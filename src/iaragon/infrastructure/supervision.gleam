@@ -9,6 +9,7 @@ import gleam/otp/static_supervisor
 import gleam/result
 import iaragon/application/reconciler
 import iaragon/application/state_owner
+import iaragon/domain/entry
 import iaragon/infrastructure/drive/backoff
 import iaragon/infrastructure/drive/changes.{type Change}
 import iaragon/infrastructure/drive/remote_poller
@@ -28,13 +29,17 @@ pub type Daemon {
 
 const poll_interval_ms = 30_000
 
-/// Start the whole tree. The composition root injects the persistence store
-/// and the (authenticated) Drive port; remote changes are delivered to
-/// `deliver_changes` — the reconciler's intake, once the pipeline lands.
+/// Start the whole tree. The composition root injects the persistence store,
+/// the (authenticated) Drive port, the mirror location and the streaming
+/// download; remote changes are delivered to `deliver_changes` — the
+/// reconciler's intake, once the pipeline lands.
 pub fn start_daemon(
   store store: state_owner.StateStore,
   drive drive: remote_poller.DrivePort,
   deliver_changes deliver_changes: Subject(List(Change)),
+  mirror_root mirror_root: String,
+  fetch_to_disk fetch_to_disk: fn(String, String) -> Result(Nil, String),
+  native_policy native_policy: entry.NativeDocPolicy,
 ) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
   let local_watcher_name = process.new_name(prefix: "local_watcher")
@@ -52,6 +57,16 @@ pub fn start_daemon(
         backoff.compute_delay_ms(attempt, int.random(1000))
       },
     )
+  let transfer_config =
+    transfer_pool.TransferConfig(
+      root_dir: mirror_root,
+      fetch_to_disk: fetch_to_disk,
+      state_owner: process.named_subject(state_owner_name),
+      native_policy: native_policy,
+      pick_retry_delay_ms: fn(attempt) {
+        backoff.compute_delay_ms(attempt, int.random(1000))
+      },
+    )
 
   static_supervisor.new(static_supervisor.OneForOne)
   |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
@@ -61,7 +76,10 @@ pub fn start_daemon(
     poller_config,
   ))
   |> static_supervisor.add(reconciler.supervised(reconciler_name))
-  |> static_supervisor.add(transfer_pool.supervised(transfer_pool_name))
+  |> static_supervisor.add(transfer_pool.supervised(
+    transfer_pool_name,
+    transfer_config,
+  ))
   |> static_supervisor.start
   |> result.map(fn(supervisor) {
     Daemon(

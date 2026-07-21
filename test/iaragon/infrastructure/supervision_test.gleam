@@ -34,6 +34,9 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       store: an_ephemeral_store(),
       drive: an_idle_drive_port(),
       deliver_changes: deliver,
+      mirror_root: "build/test-scratch/supervision/mirror",
+      fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
+      native_policy: entry.LinkFile,
     )
 
   // No page token yet, so the first poll bootstraps one through the tree:
@@ -80,12 +83,34 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
     ))
     == None
 
+  // The transfer pool is alive: a folder download needs no network and ends
+  // recorded in the state owner.
+  let probe =
+    entry.RemoteFile(
+      file_id: "id-probe",
+      name: "probe",
+      path: "probe",
+      mime_type: "application/vnd.google-apps.folder",
+      parent_id: None,
+      modified_time: "2026-07-01T10:00:00Z",
+      size: None,
+      md5: None,
+      trashed: False,
+      kind: entry.Folder,
+    )
+  process.send(daemon.transfer_pool, transfer_pool.EnqueueDownload(probe))
+  assert retry_until(40, fn() {
+    process.call(daemon.state_owner, call_timeout, state_owner.GetKnown(
+      "id-probe",
+      _,
+    ))
+    != None
+  })
+
   // The remaining stubs are alive under the supervisor and answer a ping.
   assert process.call(daemon.local_watcher, call_timeout, local_watcher.Ping)
     == Nil
   assert process.call(daemon.reconciler, call_timeout, reconciler.Ping) == Nil
-  assert process.call(daemon.transfer_pool, call_timeout, transfer_pool.Ping)
-    == Nil
 }
 
 fn wait_for_page_token(

@@ -14,9 +14,11 @@ import gleam/httpc
 import gleam/result
 import gleam/string
 import gleam/time/timestamp
+import iaragon/domain/entry
 import iaragon/infrastructure/auth/client_store
 import iaragon/infrastructure/auth/token_manager
 import iaragon/infrastructure/drive/changes
+import iaragon/infrastructure/drive/download
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
@@ -35,9 +37,30 @@ pub fn main() -> Nil {
       store: state_db.build_state_store(db),
       drive: build_drive_port(config_dir),
       deliver_changes: deliver_changes,
+      mirror_root: home <> "/GoogleDrive",
+      fetch_to_disk: build_fetch_to_disk(config_dir),
+      native_policy: entry.default_native_doc_policy(),
     )
   process.sleep_forever()
 }
+
+fn build_fetch_to_disk(
+  config_dir: String,
+) -> fn(String, String) -> Result(Nil, String) {
+  fn(file_id, destination) {
+    use access_token <- result.try(obtain_access_token(config_dir))
+    download.fetch_file_to_disk(
+      url: download.build_media_url(file_id),
+      access_token: access_token,
+      destination: destination,
+      timeout_ms: download_timeout_ms,
+    )
+    |> result.map_error(string.inspect)
+  }
+}
+
+/// Generous: big files over slow links; the stream writes as it goes.
+const download_timeout_ms = 3_600_000
 
 fn build_drive_port(config_dir: String) -> remote_poller.DrivePort {
   remote_poller.DrivePort(
