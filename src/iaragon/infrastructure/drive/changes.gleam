@@ -185,7 +185,9 @@ fn change_decoder() -> decode.Decoder(Change) {
   }
 }
 
-fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
+/// Public because files.list (the initial mirror snapshot) returns the same
+/// file projection and reuses this decoder.
+pub fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
   use file_id <- decode.field("id", decode.string)
   use name <- decode.field("name", decode.string)
   use mime_type <- decode.field("mimeType", decode.string)
