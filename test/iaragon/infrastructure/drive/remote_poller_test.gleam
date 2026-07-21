@@ -1,5 +1,4 @@
 import gleam/erlang/process.{type Subject}
-import gleam/list
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import iaragon/application/state_owner
@@ -78,9 +77,12 @@ pub fn the_first_poll_bootstraps_the_start_page_token_test() {
   let owner = start_state_owner()
   let deliver = process.new_subject()
   let port =
-    DrivePort(fetch_start_page_token: fn() { Ok("tok-0") }, fetch_all_changes: fn(_) {
-      panic as "no changes fetch expected before a token exists"
-    })
+    DrivePort(
+      fetch_start_page_token: fn() { Ok("tok-0") },
+      fetch_all_changes: fn(_) {
+        panic as "no changes fetch expected before a token exists"
+      },
+    )
   let poller = start_poller(owner, deliver, port, idle_interval)
 
   process.send(poller, remote_poller.Poll)

@@ -110,7 +110,10 @@ fn split_extension(name: String) -> #(String, String) {
       case reversed_stem {
         // A leading dot ("gitignore." reversed) is a dotfile, not an extension.
         "" -> #(name, "")
-        _ -> #(string.reverse(reversed_stem), string.reverse(reversed_extension))
+        _ -> #(
+          string.reverse(reversed_stem),
+          string.reverse(reversed_extension),
+        )
       }
     Error(Nil) -> #(name, "")
   }

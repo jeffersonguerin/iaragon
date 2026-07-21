@@ -138,18 +138,18 @@ pub fn save_page_token(
   |> replace_rows_with_nil
 }
 
-pub fn load_page_token(
-  db: Database,
-) -> Result(Option(String), sqlight.Error) {
-  use rows <- result.try(sqlight.query(
-    "SELECT value FROM sync_meta WHERE key = 'page_token'",
-    on: db.connection,
-    with: [],
-    expecting: {
-      use value <- decode.field(0, decode.string)
-      decode.success(value)
-    },
-  ))
+pub fn load_page_token(db: Database) -> Result(Option(String), sqlight.Error) {
+  use rows <- result.try(
+    sqlight.query(
+      "SELECT value FROM sync_meta WHERE key = 'page_token'",
+      on: db.connection,
+      with: [],
+      expecting: {
+        use value <- decode.field(0, decode.string)
+        decode.success(value)
+      },
+    ),
+  )
   Ok(list.first(rows) |> option.from_result)
 }
 
@@ -188,7 +188,10 @@ fn encode_kind(kind: entry.FileKind) -> #(String, Option(String)) {
   }
 }
 
-fn decode_kind(kind: String, shortcut_target: Option(String)) -> entry.FileKind {
+fn decode_kind(
+  kind: String,
+  shortcut_target: Option(String),
+) -> entry.FileKind {
   case kind, shortcut_target {
     "shortcut", Some(target_id) -> Shortcut(target_id)
     "native", _ -> GoogleNative

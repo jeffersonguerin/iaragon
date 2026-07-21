@@ -48,9 +48,7 @@ fn a_known(file_id: String) -> entry.KnownFile {
   )
 }
 
-fn start_owner(
-  store: state_owner.StateStore,
-) -> Subject(state_owner.Command) {
+fn start_owner(store: state_owner.StateStore) -> Subject(state_owner.Command) {
   let name = process.new_name(prefix: "state_owner_test")
   let assert Ok(_started) = state_owner.start(name, store)
   process.named_subject(name)

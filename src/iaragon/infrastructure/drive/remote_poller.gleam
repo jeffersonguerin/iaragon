@@ -26,8 +26,7 @@ pub type Command {
 pub type DrivePort {
   DrivePort(
     fetch_start_page_token: fn() -> Result(String, String),
-    fetch_all_changes: fn(String) ->
-      Result(#(List(Change), String), String),
+    fetch_all_changes: fn(String) -> Result(#(List(Change), String), String),
   )
 }
 
@@ -66,7 +65,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     Poll -> {
       let config = state.config

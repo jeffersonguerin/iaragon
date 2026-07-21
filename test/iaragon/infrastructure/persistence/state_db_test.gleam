@@ -30,7 +30,8 @@ pub fn every_file_kind_round_trips_test() {
   use db <- with_db
   let native =
     KnownFile(..a_known("id-n", "notes"), md5: None, kind: GoogleNative)
-  let folder = KnownFile(..a_known("id-f", "docs"), md5: None, kind: entry.Folder)
+  let folder =
+    KnownFile(..a_known("id-f", "docs"), md5: None, kind: entry.Folder)
   let shortcut =
     KnownFile(..a_known("id-s", "link"), md5: None, kind: Shortcut("id-target"))
   let assert Ok(Nil) = state_db.put_known(db, native)

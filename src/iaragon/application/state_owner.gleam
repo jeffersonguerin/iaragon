@@ -10,7 +10,7 @@
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
 import iaragon/domain/entry.{type KnownFile}
@@ -67,7 +67,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     PutKnown(file) -> {
       let assert Ok(Nil) = state.store.put_known(file)

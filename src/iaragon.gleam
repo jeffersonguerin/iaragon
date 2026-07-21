@@ -59,14 +59,16 @@ fn obtain_access_token(config_dir: String) -> Result(String, String) {
     client_store.load_client(config_dir <> "/oauth_client.json")
     |> result.map_error(string.inspect),
   )
-  token_manager.obtain_access_token(token_manager.TokenSource(
-    send: send_over_httpc,
-    client: client,
-    tokens_path: config_dir <> "/tokens.json",
-    clock: fn() {
-      timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
-    },
-  ))
+  token_manager.obtain_access_token(
+    token_manager.TokenSource(
+      send: send_over_httpc,
+      client: client,
+      tokens_path: config_dir <> "/tokens.json",
+      clock: fn() {
+        timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
+      },
+    ),
+  )
   |> result.map_error(string.inspect)
 }
 

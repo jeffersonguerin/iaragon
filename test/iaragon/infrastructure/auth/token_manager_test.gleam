@@ -108,7 +108,11 @@ pub fn a_refused_refresh_is_reported_and_keeps_the_old_file_test() {
       expires_at_unix: now - 10,
     )
   let send = fn(_request) {
-    Ok(response.Response(status: 400, headers: [], body: "{\"error\":\"invalid_grant\"}"))
+    Ok(response.Response(
+      status: 400,
+      headers: [],
+      body: "{\"error\":\"invalid_grant\"}",
+    ))
   }
   let source = a_source("refused", send, stored)
 

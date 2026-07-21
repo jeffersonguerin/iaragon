@@ -18,7 +18,10 @@ fn a_file(id: String, name: String, parent: String) -> paths.RemoteNode {
 pub fn nested_files_get_slash_joined_paths_test() {
   let resolved =
     paths.resolve_paths(
-      [a_folder("id-docs", "docs", "root"), a_file("id-1", "report.txt", "id-docs")],
+      [
+        a_folder("id-docs", "docs", "root"),
+        a_file("id-1", "report.txt", "id-docs"),
+      ],
       root_id: "root",
     )
   assert dict.get(resolved, "id-docs") == Ok("docs")
@@ -26,7 +29,8 @@ pub fn nested_files_get_slash_joined_paths_test() {
 }
 
 pub fn files_in_the_root_keep_bare_names_test() {
-  let resolved = paths.resolve_paths([a_file("id-1", "a.txt", "root")], root_id: "root")
+  let resolved =
+    paths.resolve_paths([a_file("id-1", "a.txt", "root")], root_id: "root")
   assert dict.get(resolved, "id-1") == Ok("a.txt")
 }
 
@@ -35,7 +39,10 @@ pub fn duplicate_names_are_disambiguated_deterministically_test() {
   // natural name, every other twin gets its id woven in before the extension.
   let resolved =
     paths.resolve_paths(
-      [a_file("id-b", "report.txt", "root"), a_file("id-a", "report.txt", "root")],
+      [
+        a_file("id-b", "report.txt", "root"),
+        a_file("id-a", "report.txt", "root"),
+      ],
       root_id: "root",
     )
   assert dict.get(resolved, "id-a") == Ok("report.txt")
@@ -79,7 +86,12 @@ pub fn nodes_not_reachable_from_the_root_are_excluded_test() {
       [
         a_file("id-1", "mine.txt", "root"),
         a_file("id-2", "shared.txt", "someone-elses-folder"),
-        RemoteNode(file_id: "id-3", name: "parentless", parent_id: None, is_folder: False),
+        RemoteNode(
+          file_id: "id-3",
+          name: "parentless",
+          parent_id: None,
+          is_folder: False,
+        ),
       ],
       root_id: "root",
     )

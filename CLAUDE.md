@@ -42,10 +42,15 @@ de arquivos.
   (preferida a birl), simplifile 2.6.x, filespy 0.7.x (inotify; exige
   inotify-tools em runtime), polly 3.1.x (watcher por polling, fallback; tem
   `supervised()` pronto), gleam_crypto 1.6.x (PKCE), filepath 1.1.x,
-  envoy 1.2.x ($HOME).
+  envoy 1.2.x ($HOME), sqlight 1.2.x (NIF esqlite — exige gcc/make no build).
 - FFI Erlang só quando indispensável e fino: `src/iaragon_loopback_ffi.erl`
-  (gen_tcp one-shot para o redirect OAuth). O streaming HTTP de arquivo grande
-  será o segundo caso (sobre `httpc`).
+  (gen_tcp one-shot para o redirect OAuth) e `src/iaragon_download_ffi.erl`
+  (httpc `{stream, path}` para download direto a disco; TLS confia no default
+  verify_peer do httpc em OTP ≥ 26 — mesma premissa do gleam_httpc).
+  Armadilha aprendida: `{stream, path}` FAZ APPEND em arquivo existente — por
+  isso downloads vão para `<dest>.iaragon-partial` e são renomeados no
+  sucesso (atomicidade de espelho de graça). Upload resumable será o próximo
+  FFI (fase upload).
 - Testes: gleeunit. Rodar com `gleam test`; build com `gleam build`.
 - **API gleam_otp 1.2** (pós-1.0, mudou muito — não usar API antiga):
   `actor.new(state) |> actor.on_message(fn) |> actor.named(name) |> actor.start`;
@@ -136,29 +141,38 @@ de arquivos.
 4. Overlays no gerenciador de arquivos
 
 Feito até aqui: scaffold; domínio puro (`SyncDecision` + `reconcile` +
-`reconcile_all`) com testes; esqueleto de supervisão com atores stub
-(state_owner já funcional em memória); **OAuth desktop completo**
-(PKCE RFC 7636, URL de autorização, loopback via FFI gen_tcp com validação de
-state, troca/refresh de token, stores em disco chmod 600) e **cliente da
-Changes API** (startPageToken, paginação completa até newStartPageToken,
-parsing p/ `Change`/`ChangedFile`, backoff puro em
-`infrastructure/drive/backoff`). HTTP é sempre injetado (`SendRequest`) — os
-testes usam fakes; só `login.gleam` toca a rede via httpc.
+`reconcile_all` + `paths.resolve_paths` — mapeamento fileId→POSIX com
+desambiguação determinística) com testes; **OAuth desktop completo**
+(PKCE RFC 7636, loopback via FFI gen_tcp, troca/refresh, stores chmod 600,
+`token_manager` com refresh automático por margem de 60 s); **cliente da
+Changes API** (startPageToken, paginação até newStartPageToken, backoff puro);
+**persistência SQLite** (`infrastructure/persistence/state_db`, write-through
+no `state_owner` via porta `StateStore` definida na application); **download
+streaming a disco** (FFI httpc, parcial+rename); **remote_poller real**
+(bootstrap do token, fetch→deliver→advance, retry com backoff injetado,
+re-poll por intervalo — 30 s na composição). HTTP é sempre injetado
+(`SendRequest`); só `login.gleam` e o composition root tocam a rede.
 
 Login interativo: `gleam run -m iaragon/login`. Config em `~/.config/iaragon/`:
 `oauth_client.json` (`{"client_id":…,"client_secret":…}` de um client
 "Desktop app" do Google Cloud, criado à mão) e `tokens.json` (gerado, 600).
+Estado do daemon: `~/.local/share/iaragon/state.db` (SQLite). O daemon boota
+sem credenciais (a porta Drive carrega tudo lazy e o poller só age sob `Poll`
+— ninguém envia `Poll` ainda; o pipeline liga na próxima sessão).
 
-**Próximas sessões**: transferência real de bytes (download `alt=media`,
-resumable upload; resolver streaming com FFI sobre `httpc`), resolução de
-paths a partir de parents (mapeamento lossy → alimentar o reconciler),
-persistência SQLite no state_owner, remote_poller real (Changes +
-refresh automático de token + retry com backoff), watcher inotify real.
+**Próxima sessão (fecha o download-only)**: listagem inicial completa
+(`files.list` — o primeiro espelho não vem da Changes API), pipeline
+poller→reconciler→transfer_pool (reconciler consumindo `deliver_changes`,
+compondo `paths.resolve_paths` + `reconcile_all` e despachando
+`DownloadRemote`/`DeleteLocal` para o pool com `download.fetch_file_to_disk`),
+scan local (size+mtime, md5 sob demanda) e materialização de nativos conforme
+`NativeDocPolicy` (LinkFile default). Depois: upload (resumable), watcher
+inotify, bidirecional.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` recebe `fields` com a projeção exata usada no
 parser; um redirect OAuth sem `code`/`error` é malformado, e state errado
-invalida qualquer resultado.
+invalida qualquer resultado; httpc `{stream, path}` faz append (ver FFI).
 
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
