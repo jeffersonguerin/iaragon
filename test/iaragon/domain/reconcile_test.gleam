@@ -1,9 +1,9 @@
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
-  Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit, ForgetKnown,
-  LocalEditRemoteDelete, Noop, RemoteEditLocalDelete, UploadLocal,
+  BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit,
+  ForgetKnown, LocalEditRemoteDelete, Noop, RemoteEditLocalDelete, UploadLocal,
 }
-import iaragon/domain/entry.{Blob, KnownFile, LocalFile, RemoteFile}
+import iaragon/domain/entry.{Blob, GoogleNative, KnownFile, LocalFile, RemoteFile}
 import iaragon/domain/reconcile
 
 // --- Test data builders -----------------------------------------------------
@@ -147,4 +147,103 @@ pub fn trashed_remote_of_unknown_file_noops_test() {
   // to forget.
   let remote = RemoteFile(..a_remote(), trashed: True)
   assert reconcile.reconcile(None, Some(remote), None) == Noop
+}
+
+// --- Both created without a last known state ---------------------------------
+
+pub fn both_created_with_identical_content_noops_test() {
+  // First run over a pre-populated mirror: adopt silently, no transfer.
+  assert reconcile.reconcile(Some(a_local()), Some(a_remote()), None) == Noop
+}
+
+pub fn both_created_with_different_content_conflicts_test() {
+  let local = LocalFile(..a_local(), md5: Some("zzz"))
+  assert reconcile.reconcile(Some(local), Some(a_remote()), None)
+    == Conflict("docs/report.txt", "id-1", BothCreated)
+}
+
+pub fn both_created_without_local_checksum_conflicts_test() {
+  // Without a checksum we cannot prove the copies are identical; guessing
+  // "same" here would silently overwrite one of them.
+  let local = LocalFile(..a_local(), md5: None)
+  assert reconcile.reconcile(Some(local), Some(a_remote()), None)
+    == Conflict("docs/report.txt", "id-1", BothCreated)
+}
+
+// --- Google-native files are download-only -----------------------------------
+
+fn a_native_remote() -> entry.RemoteFile {
+  RemoteFile(
+    ..a_remote(),
+    file_id: "id-doc",
+    name: "notes",
+    path: "docs/notes",
+    mime_type: "application/vnd.google-apps.document",
+    size: None,
+    md5: None,
+    kind: GoogleNative,
+  )
+}
+
+fn a_native_known() -> entry.KnownFile {
+  KnownFile(
+    ..a_known(),
+    file_id: "id-doc",
+    path: "docs/notes",
+    md5: None,
+    kind: GoogleNative,
+  )
+}
+
+pub fn native_edited_locally_never_uploads_test() {
+  // Exports are lossy and capped at 10 MB; uploading a local edit back would
+  // destroy the source document. The mirror self-heals by re-downloading.
+  let local =
+    LocalFile(path: "docs/notes", size: 99, mtime_seconds: 2000, md5: None)
+  assert reconcile.reconcile(
+      Some(local),
+      Some(a_native_remote()),
+      Some(a_native_known()),
+    )
+    == DownloadRemote("id-doc", "docs/notes")
+}
+
+pub fn native_edited_remotely_downloads_test() {
+  let remote =
+    RemoteFile(..a_native_remote(), modified_time: "2026-07-02T09:00:00Z")
+  let local =
+    LocalFile(path: "docs/notes", size: 42, mtime_seconds: 1000, md5: None)
+  assert reconcile.reconcile(Some(local), Some(remote), Some(a_native_known()))
+    == DownloadRemote("id-doc", "docs/notes")
+}
+
+pub fn native_edited_on_both_sides_downloads_without_conflict_test() {
+  // Natives are download-only: the remote copy is authoritative by policy,
+  // so there is no edit-edit conflict to surface.
+  let remote =
+    RemoteFile(..a_native_remote(), modified_time: "2026-07-02T09:00:00Z")
+  let local =
+    LocalFile(path: "docs/notes", size: 99, mtime_seconds: 2000, md5: None)
+  assert reconcile.reconcile(Some(local), Some(remote), Some(a_native_known()))
+    == DownloadRemote("id-doc", "docs/notes")
+}
+
+pub fn native_created_on_both_sides_downloads_test() {
+  // A local file already sits where a never-synced native doc must land:
+  // natives cannot round-trip, so the remote wins and gets re-materialised.
+  let local =
+    LocalFile(path: "docs/notes", size: 99, mtime_seconds: 2000, md5: None)
+  assert reconcile.reconcile(Some(local), Some(a_native_remote()), None)
+    == DownloadRemote("id-doc", "docs/notes")
+}
+
+pub fn native_untouched_noops_test() {
+  let local =
+    LocalFile(path: "docs/notes", size: 42, mtime_seconds: 1000, md5: None)
+  assert reconcile.reconcile(
+      Some(local),
+      Some(a_native_remote()),
+      Some(a_native_known()),
+    )
+    == Noop
 }

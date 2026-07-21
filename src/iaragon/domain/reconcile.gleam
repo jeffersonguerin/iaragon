@@ -7,9 +7,9 @@
 
 import gleam/option.{type Option, None, Some}
 import iaragon/domain/decision.{
-  type SyncDecision, Conflict, DeleteLocal, DeleteRemote, DownloadRemote,
-  EditEdit, ForgetKnown, LocalEditRemoteDelete, Noop, RemoteEditLocalDelete,
-  UploadLocal,
+  type SyncDecision, BothCreated, Conflict, DeleteLocal, DeleteRemote,
+  DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete, Noop,
+  RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
 
@@ -34,7 +34,17 @@ pub fn reconcile(
     Some(l), None, None -> UploadLocal(l.path)
     None, Some(r), None -> DownloadRemote(r.file_id, r.path)
     None, None, Some(k) -> ForgetKnown(k.file_id)
-    Some(_l), Some(_r), None -> todo as "both created, no last known state"
+    Some(l), Some(r), None ->
+      case r.kind {
+        // Natives cannot round-trip (no bytes, lossy export), so the remote
+        // copy is authoritative and gets re-materialised over the local one.
+        entry.GoogleNative -> DownloadRemote(r.file_id, r.path)
+        entry.Blob | entry.Folder | entry.Shortcut(_) ->
+          case share_same_content(l, r) {
+            True -> Noop
+            False -> Conflict(l.path, r.file_id, BothCreated)
+          }
+      }
     Some(l), None, Some(k) ->
       case detect_local_change(l, k) {
         False -> DeleteLocal(k.path)
@@ -46,14 +56,25 @@ pub fn reconcile(
         True -> Conflict(k.path, k.file_id, RemoteEditLocalDelete)
       }
     Some(l), Some(r), Some(k) ->
-      case detect_local_change(l, k), detect_remote_change(r, k) {
-        False, False -> Noop
-        True, False -> UploadLocal(l.path)
-        False, True -> DownloadRemote(r.file_id, k.path)
-        True, True ->
-          case share_same_content(l, r) {
-            True -> Noop
-            False -> Conflict(k.path, k.file_id, EditEdit)
+      case r.kind {
+        // Download-only by policy: a local edit of a native is never
+        // uploaded (it would destroy the source document); the mirror
+        // self-heals by re-downloading whenever either side moved.
+        entry.GoogleNative ->
+          case detect_local_change(l, k), detect_remote_change(r, k) {
+            False, False -> Noop
+            _, _ -> DownloadRemote(r.file_id, k.path)
+          }
+        entry.Blob | entry.Folder | entry.Shortcut(_) ->
+          case detect_local_change(l, k), detect_remote_change(r, k) {
+            False, False -> Noop
+            True, False -> UploadLocal(l.path)
+            False, True -> DownloadRemote(r.file_id, k.path)
+            True, True ->
+              case share_same_content(l, r) {
+                True -> Noop
+                False -> Conflict(k.path, k.file_id, EditEdit)
+              }
           }
       }
   }
