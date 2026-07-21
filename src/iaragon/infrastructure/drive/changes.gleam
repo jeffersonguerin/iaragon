@@ -99,6 +99,31 @@ pub fn fetch_changes_page(
   |> result.replace_error(UnexpectedPayload(body))
 }
 
+/// Walk every page from `page_token` to the end, accumulating changes, and
+/// return them with the `newStartPageToken` to persist for the next cycle.
+/// Fails fast on the first refusal — retry/backoff is the caller's policy.
+pub fn fetch_all_changes(
+  send: SendRequest,
+  access_token access_token: String,
+  page_token page_token: String,
+) -> Result(#(List(Change), String), DriveError) {
+  fetch_remaining_changes(send, access_token, page_token, [])
+}
+
+fn fetch_remaining_changes(
+  send: SendRequest,
+  access_token: String,
+  page_token: String,
+  seen: List(Change),
+) -> Result(#(List(Change), String), DriveError) {
+  use page <- result.try(fetch_changes_page(send, access_token, page_token))
+  let seen = list.append(seen, page.changes)
+  case page.outcome {
+    NextPage(next) -> fetch_remaining_changes(send, access_token, next, seen)
+    Done(fresh) -> Ok(#(seen, fresh))
+  }
+}
+
 fn build_get(
   access_token: String,
   path: String,

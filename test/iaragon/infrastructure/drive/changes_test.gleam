@@ -4,6 +4,7 @@ import gleam/http/request
 import gleam/http/response
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleam/uri
 import iaragon/infrastructure/drive/changes.{
   ChangePage, Changed, ChangedFile, Done, NextPage, Removed,
@@ -113,4 +114,35 @@ pub fn an_unparseable_body_is_reported_test() {
   let send = respond_with(inbox, 200, "<html>")
   assert changes.fetch_changes_page(send, access_token: "at-1", page_token: "t")
     == Error(changes.UnexpectedPayload("<html>"))
+}
+
+// --- Walking every page -------------------------------------------------------
+
+fn a_removal_page(file_id: String, continuation: String) -> String {
+  "{\"changes\":[{\"fileId\":\"" <> file_id <> "\",\"removed\":true}]," <> continuation
+}
+
+pub fn walking_accumulates_changes_across_pages_until_done_test() {
+  // The fake picks its payload by the pageToken, so it needs no state.
+  let send = fn(sent: request.Request(String)) {
+    let assert Some(query) = sent.query
+    let assert Ok(params) = uri.parse_query(query)
+    let body = case list.key_find(params, "pageToken") {
+      Ok("tok-1") -> a_removal_page("id-1", "\"nextPageToken\":\"tok-2\"}")
+      Ok("tok-2") -> a_removal_page("id-2", "\"newStartPageToken\":\"fresh-9\"}")
+      other -> panic as { "unexpected page token: " <> string.inspect(other) }
+    }
+    Ok(response.Response(status: 200, headers: [], body: body))
+  }
+
+  assert changes.fetch_all_changes(send, access_token: "at-1", page_token: "tok-1")
+    == Ok(#([Removed("id-1"), Removed("id-2")], "fresh-9"))
+}
+
+pub fn walking_stops_at_the_first_refusal_test() {
+  let send = fn(_sent) {
+    Ok(response.Response(status: 429, headers: [], body: "slow down"))
+  }
+  assert changes.fetch_all_changes(send, access_token: "at-1", page_token: "tok-1")
+    == Error(changes.RefusedByServer(429, "slow down"))
 }
