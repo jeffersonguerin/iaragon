@@ -37,7 +37,8 @@ pub fn loading_a_missing_file_reports_unreadable_test() {
 
 pub fn loading_a_corrupted_file_reports_corrupted_test() {
   let path = a_store_path("corrupted")
-  let assert Ok(Nil) = simplifile.create_directory_all(scratch_dir <> "/corrupted")
+  let assert Ok(Nil) =
+    simplifile.create_directory_all(scratch_dir <> "/corrupted")
   let assert Ok(Nil) = simplifile.write(to: path, contents: "not json at all")
   assert token_store.load_tokens(path)
     == Error(token_store.Corrupted("not json at all"))

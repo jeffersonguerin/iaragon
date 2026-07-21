@@ -146,9 +146,7 @@ fn fetch_ok_body(
   send: SendRequest,
   request: Request(String),
 ) -> Result(String, DriveError) {
-  use response <- result.try(
-    send(request) |> result.map_error(TransportFailed),
-  )
+  use response <- result.try(send(request) |> result.map_error(TransportFailed))
   case response.status {
     200 -> Ok(response.body)
     status -> Error(RefusedByServer(status, response.body))
@@ -191,14 +189,22 @@ fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
   use file_id <- decode.field("id", decode.string)
   use name <- decode.field("name", decode.string)
   use mime_type <- decode.field("mimeType", decode.string)
-  use parents <- decode.optional_field("parents", [], decode.list(decode.string))
+  use parents <- decode.optional_field(
+    "parents",
+    [],
+    decode.list(decode.string),
+  )
   use modified_time <- decode.field("modifiedTime", decode.string)
   use size_text <- decode.optional_field(
     "size",
     None,
     decode.optional(decode.string),
   )
-  use md5 <- decode.optional_field("md5Checksum", None, decode.optional(decode.string))
+  use md5 <- decode.optional_field(
+    "md5Checksum",
+    None,
+    decode.optional(decode.string),
+  )
   use trashed <- decode.optional_field("trashed", False, decode.bool)
   decode.success(ChangedFile(
     file_id:,
@@ -206,7 +212,8 @@ fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
     mime_type:,
     parent_id: list.first(parents) |> option.from_result,
     modified_time:,
-    size: size_text |> option.then(fn(text) { option.from_result(int.parse(text)) }),
+    size: size_text
+      |> option.then(fn(text) { option.from_result(int.parse(text)) }),
     md5:,
     trashed:,
   ))

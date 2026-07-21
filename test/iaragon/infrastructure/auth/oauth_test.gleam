@@ -9,7 +9,10 @@ import gleam/uri
 import iaragon/infrastructure/auth/oauth.{OauthClient, TokenResponse}
 
 fn a_client() -> oauth.OauthClient {
-  OauthClient(client_id: "abc.apps.googleusercontent.com", client_secret: "s3cr3t")
+  OauthClient(
+    client_id: "abc.apps.googleusercontent.com",
+    client_secret: "s3cr3t",
+  )
 }
 
 fn parse_query_of(url: String) -> List(#(String, String)) {
@@ -27,10 +30,14 @@ pub fn authorization_url_points_at_google_with_pkce_test() {
       state: "anti-csrf-42",
     )
 
-  assert string.starts_with(url, "https://accounts.google.com/o/oauth2/v2/auth?")
+  assert string.starts_with(
+    url,
+    "https://accounts.google.com/o/oauth2/v2/auth?",
+  )
 
   let pairs = parse_query_of(url)
-  assert list.key_find(pairs, "client_id") == Ok("abc.apps.googleusercontent.com")
+  assert list.key_find(pairs, "client_id")
+    == Ok("abc.apps.googleusercontent.com")
   assert list.key_find(pairs, "redirect_uri") == Ok("http://127.0.0.1:8123")
   assert list.key_find(pairs, "response_type") == Ok("code")
   assert list.key_find(pairs, "scope")
@@ -86,7 +93,8 @@ pub fn exchanging_the_code_posts_the_form_and_parses_tokens_test() {
   assert list.key_find(form, "grant_type") == Ok("authorization_code")
   assert list.key_find(form, "code") == Ok("code-1")
   assert list.key_find(form, "code_verifier") == Ok("verif-1")
-  assert list.key_find(form, "client_id") == Ok("abc.apps.googleusercontent.com")
+  assert list.key_find(form, "client_id")
+    == Ok("abc.apps.googleusercontent.com")
   assert list.key_find(form, "client_secret") == Ok("s3cr3t")
   assert list.key_find(form, "redirect_uri") == Ok("http://127.0.0.1:8123")
 }
@@ -110,7 +118,8 @@ pub fn refreshing_posts_the_refresh_grant_test() {
   let assert Ok(form) = uri.parse_query(sent.body)
   assert list.key_find(form, "grant_type") == Ok("refresh_token")
   assert list.key_find(form, "refresh_token") == Ok("rt-1")
-  assert list.key_find(form, "client_id") == Ok("abc.apps.googleusercontent.com")
+  assert list.key_find(form, "client_id")
+    == Ok("abc.apps.googleusercontent.com")
 }
 
 pub fn transport_failure_is_reported_test() {

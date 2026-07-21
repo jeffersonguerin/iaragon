@@ -41,7 +41,11 @@ de arquivos.
   gleam_erlang 1.3.x, gleam_json 3.1.x, gleam_httpc 5.0.x, gleam_time 1.8.x
   (preferida a birl), simplifile 2.6.x, filespy 0.7.x (inotify; exige
   inotify-tools em runtime), polly 3.1.x (watcher por polling, fallback; tem
-  `supervised()` pronto).
+  `supervised()` pronto), gleam_crypto 1.6.x (PKCE), filepath 1.1.x,
+  envoy 1.2.x ($HOME).
+- FFI Erlang só quando indispensável e fino: `src/iaragon_loopback_ffi.erl`
+  (gen_tcp one-shot para o redirect OAuth). O streaming HTTP de arquivo grande
+  será o segundo caso (sobre `httpc`).
 - Testes: gleeunit. Rodar com `gleam test`; build com `gleam build`.
 - **API gleam_otp 1.2** (pós-1.0, mudou muito — não usar API antiga):
   `actor.new(state) |> actor.on_message(fn) |> actor.named(name) |> actor.start`;
@@ -131,17 +135,43 @@ de arquivos.
 3. Bidirecional com detecção de conflito
 4. Overlays no gerenciador de arquivos
 
-Feito até aqui: scaffold; domínio puro (`SyncDecision` + `reconcile`) com testes;
-esqueleto de supervisão com atores stub. **Próximas sessões**: OAuth (loopback +
-PKCE), cliente Drive (Changes API + backoff), transferência real de bytes
-(resumable upload; resolver streaming), persistência SQLite no state_owner,
-watcher inotify real.
+Feito até aqui: scaffold; domínio puro (`SyncDecision` + `reconcile` +
+`reconcile_all`) com testes; esqueleto de supervisão com atores stub
+(state_owner já funcional em memória); **OAuth desktop completo**
+(PKCE RFC 7636, URL de autorização, loopback via FFI gen_tcp com validação de
+state, troca/refresh de token, stores em disco chmod 600) e **cliente da
+Changes API** (startPageToken, paginação completa até newStartPageToken,
+parsing p/ `Change`/`ChangedFile`, backoff puro em
+`infrastructure/drive/backoff`). HTTP é sempre injetado (`SendRequest`) — os
+testes usam fakes; só `login.gleam` toca a rede via httpc.
+
+Login interativo: `gleam run -m iaragon/login`. Config em `~/.config/iaragon/`:
+`oauth_client.json` (`{"client_id":…,"client_secret":…}` de um client
+"Desktop app" do Google Cloud, criado à mão) e `tokens.json` (gerado, 600).
+
+**Próximas sessões**: transferência real de bytes (download `alt=media`,
+resumable upload; resolver streaming com FFI sobre `httpc`), resolução de
+paths a partir de parents (mapeamento lossy → alimentar o reconciler),
+persistência SQLite no state_owner, remote_poller real (Changes +
+refresh automático de token + retry com backoff), watcher inotify real.
+
+Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
+JSON do Drive; `changes.list` recebe `fields` com a projeção exata usada no
+parser; um redirect OAuth sem `code`/`error` é malformado, e state errado
+invalida qualquer resultado.
 
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
-- Erlang/OTP via apt (OTP 25 funciona com Gleam 1.17); `rebar3` via apt
-  (necessário para compilar a dep Erlang `fs` do filespy).
+- **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas
+  `bit_array.base64_url_encode` do stdlib explode em runtime ("OTP/26 or
+  higher is required"). Usar OTP pré-compilado do builds.hex.pm:
+  `curl https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-27.3.4.14.tar.gz`,
+  extrair p/ /opt/otp27, rodar `/opt/otp27/Install -minimal /opt/otp27`,
+  `export PATH=/opt/otp27/bin:$PATH` (exportar em cada shell novo).
+- `rebar3` via apt (necessário para compilar a dep Erlang `fs` do filespy).
 - Binário do Gleam: GitHub releases; se o GitHub estiver bloqueado pelo proxy da
   sessão, extrair da imagem OCI oficial `ghcr.io/gleam-lang/gleam:vX.Y.Z-scratch`
   (binário musl estático em `/bin/gleam`, baixável com curl + Bearer token
   anônimo do ghcr.io).
+- O "backend port not found: inotifywait" nos testes é a app `fs` do filespy
+  avisando que inotify-tools falta — inofensivo enquanto o watcher é stub.

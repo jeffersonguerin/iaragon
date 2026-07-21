@@ -112,9 +112,7 @@ fn request_tokens(
     |> request.set_header("content-type", "application/x-www-form-urlencoded")
     |> request.set_body(uri.query_to_string(form))
 
-  use response <- result.try(
-    send(request) |> result.map_error(TransportFailed),
-  )
+  use response <- result.try(send(request) |> result.map_error(TransportFailed))
   case response.status {
     200 -> parse_token_payload(response.body)
     status -> Error(RefusedByServer(status, response.body))
@@ -130,7 +128,11 @@ fn parse_token_payload(body: String) -> Result(TokenResponse, OauthError) {
       decode.optional(decode.string),
     )
     use expires_in_seconds <- decode.field("expires_in", decode.int)
-    decode.success(TokenResponse(access_token:, refresh_token:, expires_in_seconds:))
+    decode.success(TokenResponse(
+      access_token:,
+      refresh_token:,
+      expires_in_seconds:,
+    ))
   }
   json.parse(from: body, using: decoder)
   |> result.replace_error(UnexpectedPayload(body))

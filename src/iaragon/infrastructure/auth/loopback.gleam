@@ -53,7 +53,11 @@ fn parse_redirect(
 
   let state_matches = list.key_find(params, "state") == Ok(expected_state)
   // Whatever the outcome, it only counts when the anti-CSRF state matches.
-  case state_matches, list.key_find(params, "code"), list.key_find(params, "error") {
+  case
+    state_matches,
+    list.key_find(params, "code"),
+    list.key_find(params, "error")
+  {
     True, Ok(code), _ -> Ok(code)
     True, _, Ok(error) -> Error(DeniedByUser(error))
     False, Ok(_), _ -> Error(MismatchedState)

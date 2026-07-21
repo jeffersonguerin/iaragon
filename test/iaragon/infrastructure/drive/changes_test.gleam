@@ -77,9 +77,17 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
       md5: None,
       trashed: True,
     )
-  assert changes.fetch_changes_page(send, access_token: "at-1", page_token: "tok-1")
+  assert changes.fetch_changes_page(
+      send,
+      access_token: "at-1",
+      page_token: "tok-1",
+    )
     == Ok(ChangePage(
-      changes: [Changed(expected_blob), Removed("id-2"), Changed(expected_native)],
+      changes: [
+        Changed(expected_blob),
+        Removed("id-2"),
+        Changed(expected_native),
+      ],
       outcome: NextPage("next-1"),
     ))
 
@@ -97,8 +105,16 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
 pub fn the_final_page_carries_the_new_start_token_test() {
   let inbox = process.new_subject()
   let send =
-    respond_with(inbox, 200, "{\"changes\":[],\"newStartPageToken\":\"fresh-1\"}")
-  assert changes.fetch_changes_page(send, access_token: "at-1", page_token: "tok-9")
+    respond_with(
+      inbox,
+      200,
+      "{\"changes\":[],\"newStartPageToken\":\"fresh-1\"}",
+    )
+  assert changes.fetch_changes_page(
+      send,
+      access_token: "at-1",
+      page_token: "tok-9",
+    )
     == Ok(ChangePage(changes: [], outcome: Done("fresh-1")))
 }
 
@@ -119,7 +135,10 @@ pub fn an_unparseable_body_is_reported_test() {
 // --- Walking every page -------------------------------------------------------
 
 fn a_removal_page(file_id: String, continuation: String) -> String {
-  "{\"changes\":[{\"fileId\":\"" <> file_id <> "\",\"removed\":true}]," <> continuation
+  "{\"changes\":[{\"fileId\":\""
+  <> file_id
+  <> "\",\"removed\":true}],"
+  <> continuation
 }
 
 pub fn walking_accumulates_changes_across_pages_until_done_test() {
@@ -129,13 +148,18 @@ pub fn walking_accumulates_changes_across_pages_until_done_test() {
     let assert Ok(params) = uri.parse_query(query)
     let body = case list.key_find(params, "pageToken") {
       Ok("tok-1") -> a_removal_page("id-1", "\"nextPageToken\":\"tok-2\"}")
-      Ok("tok-2") -> a_removal_page("id-2", "\"newStartPageToken\":\"fresh-9\"}")
+      Ok("tok-2") ->
+        a_removal_page("id-2", "\"newStartPageToken\":\"fresh-9\"}")
       other -> panic as { "unexpected page token: " <> string.inspect(other) }
     }
     Ok(response.Response(status: 200, headers: [], body: body))
   }
 
-  assert changes.fetch_all_changes(send, access_token: "at-1", page_token: "tok-1")
+  assert changes.fetch_all_changes(
+      send,
+      access_token: "at-1",
+      page_token: "tok-1",
+    )
     == Ok(#([Removed("id-1"), Removed("id-2")], "fresh-9"))
 }
 
@@ -143,6 +167,10 @@ pub fn walking_stops_at_the_first_refusal_test() {
   let send = fn(_sent) {
     Ok(response.Response(status: 429, headers: [], body: "slow down"))
   }
-  assert changes.fetch_all_changes(send, access_token: "at-1", page_token: "tok-1")
+  assert changes.fetch_all_changes(
+      send,
+      access_token: "at-1",
+      page_token: "tok-1",
+    )
     == Error(changes.RefusedByServer(429, "slow down"))
 }

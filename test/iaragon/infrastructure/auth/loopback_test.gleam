@@ -1,5 +1,4 @@
 import gleam/erlang/process
-import gleam/http
 import gleam/http/request
 import gleam/httpc
 import gleam/int
