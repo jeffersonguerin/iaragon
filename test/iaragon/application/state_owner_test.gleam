@@ -1,4 +1,5 @@
 import gleam/erlang/process.{type Subject}
+import gleam/list
 import gleam/option.{None, Some}
 import iaragon/application/state_owner.{StateStore}
 import iaragon/domain/entry.{Blob, KnownFile}
@@ -83,6 +84,19 @@ pub fn forget_known_evicts_and_writes_through_test() {
   process.send(owner, state_owner.ForgetKnown("id-1"))
   assert process.call(owner, 500, state_owner.GetKnown("id-1", _)) == None
   assert process.receive(calls, 500) == Ok(ForgetCalled("id-1"))
+}
+
+pub fn list_known_returns_everything_in_the_cache_test() {
+  let calls = process.new_subject()
+  let preloaded = a_known("id-1")
+  let owner = start_owner(a_recording_store(calls, [preloaded], None))
+  let added = a_known("id-2")
+  process.send(owner, state_owner.PutKnown(added))
+
+  let known = process.call(owner, 500, state_owner.ListKnown)
+  assert list.contains(known, preloaded)
+  assert list.contains(known, added)
+  assert list.length(known) == 2
 }
 
 pub fn set_page_token_caches_and_writes_through_test() {

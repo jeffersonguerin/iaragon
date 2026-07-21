@@ -18,6 +18,7 @@ import iaragon/domain/entry.{type KnownFile}
 pub type Command {
   PutKnown(file: KnownFile)
   GetKnown(file_id: String, reply: Subject(Option(KnownFile)))
+  ListKnown(reply: Subject(List(KnownFile)))
   ForgetKnown(file_id: String)
   SetPageToken(token: String)
   GetPageToken(reply: Subject(Option(String)))
@@ -86,6 +87,10 @@ fn handle_command(
         reply,
         option.from_result(dict.get(state.known_by_id, file_id)),
       )
+      actor.continue(state)
+    }
+    ListKnown(reply) -> {
+      process.send(reply, dict.values(state.known_by_id))
       actor.continue(state)
     }
     ForgetKnown(file_id) -> {
