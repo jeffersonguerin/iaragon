@@ -247,3 +247,50 @@ pub fn native_untouched_noops_test() {
     )
     == Noop
 }
+
+// --- reconcile_all: joining the three collections ----------------------------
+
+pub fn reconcile_all_of_fully_synced_state_decides_nothing_test() {
+  assert reconcile.reconcile_all([a_local()], [a_remote()], [a_known()]) == []
+}
+
+pub fn reconcile_all_joins_known_files_by_id_and_path_test() {
+  // The known trio, locally modified: must be joined into ONE decision, not
+  // seen as an orphan local plus an orphan remote.
+  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  assert reconcile.reconcile_all([local], [a_remote()], [a_known()])
+    == [UploadLocal("docs/report.txt")]
+}
+
+pub fn reconcile_all_pairs_never_synced_twins_by_path_test() {
+  // A never-synced local and a never-synced remote at the same path must be
+  // joined into one both-created reconciliation, not upload + download.
+  let local =
+    LocalFile(path: "b.txt", size: 1, mtime_seconds: 1, md5: Some("zzz"))
+  let remote =
+    RemoteFile(..a_remote(), file_id: "id-2", name: "b.txt", path: "b.txt")
+  assert reconcile.reconcile_all([local], [remote], [])
+    == [Conflict("b.txt", "id-2", BothCreated)]
+}
+
+pub fn reconcile_all_covers_orphans_on_every_side_test() {
+  let modified_known =
+    LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let new_local =
+    LocalFile(path: "new.txt", size: 1, mtime_seconds: 1, md5: Some("nnn"))
+  let new_remote =
+    RemoteFile(..a_remote(), file_id: "id-2", name: "b.txt", path: "b.txt")
+  let stale_known =
+    KnownFile(..a_known(), file_id: "id-3", path: "gone.txt")
+  assert reconcile.reconcile_all(
+      [modified_known, new_local],
+      [a_remote(), new_remote],
+      [a_known(), stale_known],
+    )
+    == [
+      UploadLocal("docs/report.txt"),
+      ForgetKnown("id-3"),
+      DownloadRemote("id-2", "b.txt"),
+      UploadLocal("new.txt"),
+    ]
+}

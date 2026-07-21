@@ -5,7 +5,10 @@
 //// the presence level. An unhandled combination must be a compile error,
 //// because an unhandled combination at runtime is silent data loss.
 
+import gleam/dict
+import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set
 import iaragon/domain/decision.{
   type SyncDecision, BothCreated, Conflict, DeleteLocal, DeleteRemote,
   DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete, Noop,
@@ -78,6 +81,67 @@ pub fn reconcile(
           }
       }
   }
+}
+
+/// Reconcile whole snapshots: join the three collections into per-file
+/// trios — known files by (file_id, path), never-synced twins by path — and
+/// reconcile each one. Pure, like everything in this module. `Noop`s are
+/// dropped: the result is the list of actions to take.
+pub fn reconcile_all(
+  locals: List(LocalFile),
+  remotes: List(RemoteFile),
+  lasts: List(KnownFile),
+) -> List(SyncDecision) {
+  let local_by_path =
+    list.fold(locals, dict.new(), fn(acc, l) { dict.insert(acc, l.path, l) })
+  let remote_by_id =
+    list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
+
+  // Known files anchor the join: their file_id claims a remote and their
+  // path claims a local file.
+  let known_decisions =
+    list.map(lasts, fn(k) {
+      reconcile(
+        option.from_result(dict.get(local_by_path, k.path)),
+        option.from_result(dict.get(remote_by_id, k.file_id)),
+        Some(k),
+      )
+    })
+  let claimed_paths =
+    list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
+  let claimed_ids =
+    list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.file_id) })
+
+  // Remotes nobody knows yet: a local file already sitting at the same path
+  // is their never-synced twin, and that path is thereby claimed too.
+  let orphan_remotes =
+    list.filter(remotes, fn(r) { !set.contains(claimed_ids, r.file_id) })
+  let remote_decisions =
+    list.map(orphan_remotes, fn(r) {
+      case set.contains(claimed_paths, r.path) {
+        True -> reconcile(None, Some(r), None)
+        False ->
+          reconcile(
+            option.from_result(dict.get(local_by_path, r.path)),
+            Some(r),
+            None,
+          )
+      }
+    })
+  let claimed_paths =
+    list.fold(orphan_remotes, claimed_paths, fn(acc, r) {
+      set.insert(acc, r.path)
+    })
+
+  // Locals nothing has claimed are brand new on this side.
+  let local_decisions =
+    locals
+    |> list.filter(fn(l) { !set.contains(claimed_paths, l.path) })
+    |> list.map(fn(l) { reconcile(Some(l), None, None) })
+
+  [known_decisions, remote_decisions, local_decisions]
+  |> list.flatten
+  |> list.filter(fn(decision) { decision != Noop })
 }
 
 /// Cheap metadata first (size + mtime); when both sides carry an md5 it is
