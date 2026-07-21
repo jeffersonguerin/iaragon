@@ -7,6 +7,8 @@ import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
+import iaragon/application/state_owner
 import iaragon/domain/entry.{
   type KnownFile, Blob, Folder, GoogleNative, KnownFile, Shortcut,
 }
@@ -39,6 +41,21 @@ pub fn open(path: String) -> Result(Database, sqlight.Error) {
   use connection <- result.try(sqlight.open(path))
   use Nil <- result.try(sqlight.exec(create_schema, connection))
   Ok(Database(connection))
+}
+
+/// Adapt this database to the state owner's persistence port.
+pub fn build_state_store(db: Database) -> state_owner.StateStore {
+  state_owner.StateStore(
+    load_all_known: fn() { load_all_known(db) |> describe_error },
+    load_page_token: fn() { load_page_token(db) |> describe_error },
+    put_known: fn(file) { put_known(db, file) |> describe_error },
+    forget_known: fn(file_id) { forget_known(db, file_id) |> describe_error },
+    save_page_token: fn(token) { save_page_token(db, token) |> describe_error },
+  )
+}
+
+fn describe_error(result: Result(a, sqlight.Error)) -> Result(a, String) {
+  result.map_error(result, string.inspect)
 }
 
 pub fn put_known(db: Database, file: KnownFile) -> Result(Nil, sqlight.Error) {

@@ -25,7 +25,11 @@ pub type Daemon {
 
 /// Start the whole tree. Actors are registered under fresh names so their
 /// subjects survive a supervisor-driven restart of the underlying process.
-pub fn start_daemon() -> Result(Daemon, actor.StartError) {
+/// The state store is injected by the composition root (SQLite in
+/// production, fakes in tests).
+pub fn start_daemon(
+  store store: state_owner.StateStore,
+) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
   let local_watcher_name = process.new_name(prefix: "local_watcher")
   let remote_poller_name = process.new_name(prefix: "remote_poller")
@@ -33,7 +37,7 @@ pub fn start_daemon() -> Result(Daemon, actor.StartError) {
   let transfer_pool_name = process.new_name(prefix: "transfer_pool")
 
   static_supervisor.new(static_supervisor.OneForOne)
-  |> static_supervisor.add(state_owner.supervised(state_owner_name))
+  |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
   |> static_supervisor.add(local_watcher.supervised(local_watcher_name))
   |> static_supervisor.add(remote_poller.supervised(remote_poller_name))
   |> static_supervisor.add(reconciler.supervised(reconciler_name))

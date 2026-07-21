@@ -10,8 +10,18 @@ import iaragon/infrastructure/supervision
 
 const call_timeout = 500
 
+fn an_ephemeral_store() -> state_owner.StateStore {
+  state_owner.StateStore(
+    load_all_known: fn() { Ok([]) },
+    load_page_token: fn() { Ok(None) },
+    put_known: fn(_file) { Ok(Nil) },
+    forget_known: fn(_file_id) { Ok(Nil) },
+    save_page_token: fn(_token) { Ok(Nil) },
+  )
+}
+
 pub fn daemon_tree_starts_and_actors_respond_test() {
-  let assert Ok(daemon) = supervision.start_daemon()
+  let assert Ok(daemon) = supervision.start_daemon(store: an_ephemeral_store())
 
   // The state owner does real (in-memory) work: page token round-trip…
   assert process.call(
