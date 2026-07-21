@@ -1,5 +1,7 @@
-import gleam/io
+import gleam/erlang/process
+import iaragon/infrastructure/supervision
 
 pub fn main() -> Nil {
-  io.println("iaragon: not wired up yet")
+  let assert Ok(_daemon) = supervision.start_daemon()
+  process.sleep_forever()
 }

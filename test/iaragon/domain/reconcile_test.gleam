@@ -3,7 +3,9 @@ import iaragon/domain/decision.{
   BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit,
   ForgetKnown, LocalEditRemoteDelete, Noop, RemoteEditLocalDelete, UploadLocal,
 }
-import iaragon/domain/entry.{Blob, GoogleNative, KnownFile, LocalFile, RemoteFile}
+import iaragon/domain/entry.{
+  Blob, GoogleNative, KnownFile, LocalFile, RemoteFile,
+}
 import iaragon/domain/reconcile
 
 // --- Test data builders -----------------------------------------------------
@@ -12,7 +14,12 @@ import iaragon/domain/reconcile
 // sides. Individual tests derive modified/deleted variants from these.
 
 fn a_local() -> entry.LocalFile {
-  LocalFile(path: "docs/report.txt", size: 42, mtime_seconds: 1000, md5: Some("aaa"))
+  LocalFile(
+    path: "docs/report.txt",
+    size: 42,
+    mtime_seconds: 1000,
+    md5: Some("aaa"),
+  )
 }
 
 fn a_remote() -> entry.RemoteFile {
@@ -70,28 +77,39 @@ pub fn unchanged_everywhere_noops_test() {
 }
 
 pub fn modified_only_locally_uploads_test() {
-  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let local =
+    LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
   assert reconcile.reconcile(Some(local), Some(a_remote()), Some(a_known()))
     == UploadLocal("docs/report.txt")
 }
 
 pub fn modified_only_remotely_downloads_test() {
   let remote =
-    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+    RemoteFile(
+      ..a_remote(),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
   assert reconcile.reconcile(Some(a_local()), Some(remote), Some(a_known()))
     == DownloadRemote("id-1", "docs/report.txt")
 }
 
 pub fn modified_on_both_sides_conflicts_test() {
-  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let local =
+    LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
   let remote =
-    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+    RemoteFile(
+      ..a_remote(),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
   assert reconcile.reconcile(Some(local), Some(remote), Some(a_known()))
     == Conflict("docs/report.txt", "id-1", EditEdit)
 }
 
 pub fn modified_on_both_sides_to_same_content_noops_test() {
-  let local = LocalFile(..a_local(), size: 50, mtime_seconds: 2000, md5: Some("ddd"))
+  let local =
+    LocalFile(..a_local(), size: 50, mtime_seconds: 2000, md5: Some("ddd"))
   let remote =
     RemoteFile(
       ..a_remote(),
@@ -130,14 +148,19 @@ pub fn trashed_remotely_counts_as_remote_delete_test() {
 }
 
 pub fn local_edit_with_remote_delete_conflicts_test() {
-  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let local =
+    LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
   assert reconcile.reconcile(Some(local), None, Some(a_known()))
     == Conflict("docs/report.txt", "id-1", LocalEditRemoteDelete)
 }
 
 pub fn remote_edit_with_local_delete_conflicts_test() {
   let remote =
-    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+    RemoteFile(
+      ..a_remote(),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
   assert reconcile.reconcile(None, Some(remote), Some(a_known()))
     == Conflict("docs/report.txt", "id-1", RemoteEditLocalDelete)
 }
@@ -257,7 +280,8 @@ pub fn reconcile_all_of_fully_synced_state_decides_nothing_test() {
 pub fn reconcile_all_joins_known_files_by_id_and_path_test() {
   // The known trio, locally modified: must be joined into ONE decision, not
   // seen as an orphan local plus an orphan remote.
-  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let local =
+    LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
   assert reconcile.reconcile_all([local], [a_remote()], [a_known()])
     == [UploadLocal("docs/report.txt")]
 }
@@ -280,8 +304,7 @@ pub fn reconcile_all_covers_orphans_on_every_side_test() {
     LocalFile(path: "new.txt", size: 1, mtime_seconds: 1, md5: Some("nnn"))
   let new_remote =
     RemoteFile(..a_remote(), file_id: "id-2", name: "b.txt", path: "b.txt")
-  let stale_known =
-    KnownFile(..a_known(), file_id: "id-3", path: "gone.txt")
+  let stale_known = KnownFile(..a_known(), file_id: "id-3", path: "gone.txt")
   assert reconcile.reconcile_all(
       [modified_known, new_local],
       [a_remote(), new_remote],

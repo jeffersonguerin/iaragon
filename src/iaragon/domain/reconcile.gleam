@@ -150,8 +150,7 @@ fn detect_local_change(local: LocalFile, last: KnownFile) -> Bool {
   case local.md5, last.md5 {
     Some(local_md5), Some(last_md5) -> local_md5 != last_md5
     _, _ ->
-      local.size != last.size
-      || local.mtime_seconds != last.local_mtime_seconds
+      local.size != last.size || local.mtime_seconds != last.local_mtime_seconds
   }
 }
 
