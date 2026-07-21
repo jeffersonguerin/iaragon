@@ -1,20 +1,27 @@
-//// Polls the Drive Changes API and feeds remote deltas into the pipeline.
-//// The very first poll bootstraps the persisted startPageToken (no history
-//// is replayed); subsequent polls fetch every page, hand the changes to
-//// `deliver`, and advance the token via the state owner — in that order, so
-//// a crash between the two re-fetches changes instead of losing them.
+//// Polls the Drive Changes API and feeds the reconciler. The FIRST
+//// successful cycle always seeds the mirror (real root id + full listing):
+//// the reconciler's remote model lives in memory and does not survive
+//// restarts, and the very first run has no history at all. Cycle order is
+//// deliberate — start page token before the snapshot, so changes that land
+//// mid-listing are replayed afterwards (idempotent) instead of lost.
 ////
-//// Refusals (quota, transient errors) reschedule the poll with the injected
-//// retry delay (truncated exponential backoff in production); successes
-//// re-arm the regular polling interval. Isolated under the supervisor: a
-//// crash restarts only this actor.
+//// After seeding: fetch every page, deliver the observations BEFORE
+//// advancing the token (a crash in between re-fetches instead of losing
+//// changes), retry refusals with the injected delay, re-arm the polling
+//// interval on success. Drive wire types are translated here into the
+//// application's contract — application code never imports this module.
 
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
+import iaragon/application/reconciler.{
+  type RemoteObservation, type RemoteSighting,
+}
 import iaragon/application/state_owner
-import iaragon/infrastructure/drive/changes.{type Change}
+import iaragon/infrastructure/drive/changes.{type Change, type ChangedFile}
 
 pub type Command {
   Poll
@@ -26,6 +33,9 @@ pub type Command {
 pub type DrivePort {
   DrivePort(
     fetch_start_page_token: fn() -> Result(String, String),
+    /// Real root id + full files.list snapshot.
+    fetch_mirror_snapshot: fn() ->
+      Result(#(String, List(RemoteSighting)), String),
     fetch_all_changes: fn(String) -> Result(#(List(Change), String), String),
   )
 }
@@ -34,14 +44,19 @@ pub type PollerConfig {
   PollerConfig(
     drive: DrivePort,
     state_owner: Subject(state_owner.Command),
-    deliver: Subject(List(Change)),
+    deliver: Subject(reconciler.Command),
     poll_interval_ms: Int,
     pick_retry_delay_ms: fn(Int) -> Int,
   )
 }
 
 type State {
-  State(config: PollerConfig, self: Subject(Command), failed_attempts: Int)
+  State(
+    config: PollerConfig,
+    self: Subject(Command),
+    failed_attempts: Int,
+    seeded: Bool,
+  )
 }
 
 pub fn supervised(
@@ -59,32 +74,29 @@ pub fn start(
     config: config,
     self: process.named_subject(name),
     failed_attempts: 0,
+    seeded: False,
   ))
   |> actor.on_message(handle_command)
   |> actor.named(name)
   |> actor.start
 }
 
-fn handle_command(
-  state: State,
-  command: Command,
-) -> actor.Next(State, Command) {
+fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
   case command {
     Poll -> {
-      let config = state.config
-      let outcome = case
-        process.call(config.state_owner, 5000, state_owner.GetPageToken)
-      {
-        None -> bootstrap_page_token(config)
-        Some(page_token) -> advance_changes(config, page_token)
+      let outcome = case state.seeded {
+        False -> seed_mirror(state.config)
+        True -> advance_changes(state.config)
       }
       case outcome {
         Ok(Nil) -> {
-          process.send_after(state.self, config.poll_interval_ms, Poll)
-          actor.continue(State(..state, failed_attempts: 0))
+          process.send_after(state.self, state.config.poll_interval_ms, Poll)
+          actor.continue(
+            State(..state, failed_attempts: 0, seeded: True),
+          )
         }
         Error(_reason) -> {
-          let delay = config.pick_retry_delay_ms(state.failed_attempts)
+          let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
           process.send_after(state.self, delay, Poll)
           actor.continue(
             State(..state, failed_attempts: state.failed_attempts + 1),
@@ -95,29 +107,60 @@ fn handle_command(
   }
 }
 
-fn bootstrap_page_token(config: PollerConfig) -> Result(Nil, String) {
-  case config.drive.fetch_start_page_token() {
-    Ok(token) -> {
+fn seed_mirror(config: PollerConfig) -> Result(Nil, String) {
+  // Token first: changes that happen during the listing get replayed later.
+  use Nil <- result.try(ensure_page_token(config))
+  use #(root_id, files) <- result.try(config.drive.fetch_mirror_snapshot())
+  process.send(config.deliver, reconciler.SeedMirror(root_id, files))
+  Ok(Nil)
+}
+
+fn ensure_page_token(config: PollerConfig) -> Result(Nil, String) {
+  case process.call(config.state_owner, 5000, state_owner.GetPageToken) {
+    Some(_token) -> Ok(Nil)
+    None -> {
+      use token <- result.try(config.drive.fetch_start_page_token())
       process.send(config.state_owner, state_owner.SetPageToken(token))
       Ok(Nil)
     }
-    Error(reason) -> Error(reason)
   }
 }
 
-fn advance_changes(
-  config: PollerConfig,
-  page_token: String,
-) -> Result(Nil, String) {
-  case config.drive.fetch_all_changes(page_token) {
-    Ok(#(changes, fresh_token)) -> {
-      case changes {
-        [] -> Nil
-        changes -> process.send(config.deliver, changes)
-      }
-      process.send(config.state_owner, state_owner.SetPageToken(fresh_token))
-      Ok(Nil)
-    }
-    Error(reason) -> Error(reason)
+fn advance_changes(config: PollerConfig) -> Result(Nil, String) {
+  let assert Some(page_token) =
+    process.call(config.state_owner, 5000, state_owner.GetPageToken)
+  use #(changes, fresh_token) <- result.try(config.drive.fetch_all_changes(page_token))
+  case changes {
+    [] -> Nil
+    changes ->
+      process.send(
+        config.deliver,
+        reconciler.ApplyRemoteChanges(translate_changes(changes)),
+      )
   }
+  process.send(config.state_owner, state_owner.SetPageToken(fresh_token))
+  Ok(Nil)
+}
+
+/// Map the Drive wire format onto the application's intake contract.
+pub fn translate_changes(changes: List(Change)) -> List(RemoteObservation) {
+  list.map(changes, fn(change) {
+    case change {
+      changes.Changed(file) -> reconciler.ObservedFile(translate_file(file))
+      changes.Removed(file_id) -> reconciler.ObservedRemoval(file_id)
+    }
+  })
+}
+
+pub fn translate_file(file: ChangedFile) -> RemoteSighting {
+  reconciler.RemoteSighting(
+    file_id: file.file_id,
+    name: file.name,
+    mime_type: file.mime_type,
+    parent_id: file.parent_id,
+    modified_time: file.modified_time,
+    size: file.size,
+    md5: file.md5,
+    trashed: file.trashed,
+  )
 }

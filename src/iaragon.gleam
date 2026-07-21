@@ -11,6 +11,7 @@ import gleam/float
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
+import gleam/list
 import gleam/result
 import gleam/string
 import gleam/time/timestamp
@@ -19,6 +20,7 @@ import iaragon/infrastructure/auth/client_store
 import iaragon/infrastructure/auth/token_manager
 import iaragon/infrastructure/drive/changes
 import iaragon/infrastructure/drive/download
+import iaragon/infrastructure/drive/listing
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
@@ -31,16 +33,16 @@ pub fn main() -> Nil {
   let assert Ok(db) = state_db.open(data_dir <> "/state.db")
 
   let config_dir = home <> "/.config/iaragon"
-  let deliver_changes = process.new_subject()
-  let assert Ok(_daemon) =
+  let assert Ok(daemon) =
     supervision.start_daemon(
       store: state_db.build_state_store(db),
       drive: build_drive_port(config_dir),
-      deliver_changes: deliver_changes,
       mirror_root: home <> "/GoogleDrive",
       fetch_to_disk: build_fetch_to_disk(config_dir),
       native_policy: entry.default_native_doc_policy(),
     )
+  // Kick the pipeline: seed on the first cycle, then poll every interval.
+  process.send(daemon.remote_poller, remote_poller.Poll)
   process.sleep_forever()
 }
 
@@ -68,6 +70,18 @@ fn build_drive_port(config_dir: String) -> remote_poller.DrivePort {
       use access_token <- result.try(obtain_access_token(config_dir))
       changes.fetch_start_page_token(send_over_httpc, access_token)
       |> result.map_error(string.inspect)
+    },
+    fetch_mirror_snapshot: fn() {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      use root_id <- result.try(
+        listing.fetch_root_id(send_over_httpc, access_token)
+        |> result.map_error(string.inspect),
+      )
+      use files <- result.try(
+        listing.fetch_full_listing(send_over_httpc, access_token)
+        |> result.map_error(string.inspect),
+      )
+      Ok(#(root_id, list.map(files, remote_poller.translate_file)))
     },
     fetch_all_changes: fn(page_token) {
       use access_token <- result.try(obtain_access_token(config_dir))

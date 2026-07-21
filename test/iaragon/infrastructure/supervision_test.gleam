@@ -23,17 +23,16 @@ fn an_ephemeral_store() -> state_owner.StateStore {
 fn an_idle_drive_port() -> remote_poller.DrivePort {
   remote_poller.DrivePort(
     fetch_start_page_token: fn() { Ok("tok-boot") },
+    fetch_mirror_snapshot: fn() { Ok(#("root-1", [])) },
     fetch_all_changes: fn(_page_token) { Error("not under test") },
   )
 }
 
 pub fn daemon_tree_starts_and_actors_respond_test() {
-  let deliver = process.new_subject()
   let assert Ok(daemon) =
     supervision.start_daemon(
       store: an_ephemeral_store(),
       drive: an_idle_drive_port(),
-      deliver_changes: deliver,
       mirror_root: "build/test-scratch/supervision/mirror",
       fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
       native_policy: entry.LinkFile,

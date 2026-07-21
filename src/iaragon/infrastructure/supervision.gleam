@@ -11,7 +11,6 @@ import iaragon/application/reconciler
 import iaragon/application/state_owner
 import iaragon/domain/entry
 import iaragon/infrastructure/drive/backoff
-import iaragon/infrastructure/drive/changes.{type Change}
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/fs/hashing
@@ -33,12 +32,12 @@ const poll_interval_ms = 30_000
 
 /// Start the whole tree. The composition root injects the persistence store,
 /// the (authenticated) Drive port, the mirror location and the streaming
-/// download; remote changes are delivered to `deliver_changes` — the
-/// reconciler's intake, once the pipeline lands.
+/// download. The pipeline is wired here: poller → reconciler →
+/// transfer pool → state owner. Nothing syncs until someone sends the
+/// first `Poll` (the composition root's decision).
 pub fn start_daemon(
   store store: state_owner.StateStore,
   drive drive: remote_poller.DrivePort,
-  deliver_changes deliver_changes: Subject(List(Change)),
   mirror_root mirror_root: String,
   fetch_to_disk fetch_to_disk: fn(String, String) -> Result(Nil, String),
   native_policy native_policy: entry.NativeDocPolicy,
@@ -53,7 +52,7 @@ pub fn start_daemon(
     remote_poller.PollerConfig(
       drive: drive,
       state_owner: process.named_subject(state_owner_name),
-      deliver: deliver_changes,
+      deliver: process.named_subject(reconciler_name),
       poll_interval_ms: poll_interval_ms,
       pick_retry_delay_ms: fn(attempt) {
         backoff.compute_delay_ms(attempt, int.random(1000))
