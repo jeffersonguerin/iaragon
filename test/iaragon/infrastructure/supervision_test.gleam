@@ -20,16 +20,34 @@ fn an_ephemeral_store() -> state_owner.StateStore {
   )
 }
 
-pub fn daemon_tree_starts_and_actors_respond_test() {
-  let assert Ok(daemon) = supervision.start_daemon(store: an_ephemeral_store())
+fn an_idle_drive_port() -> remote_poller.DrivePort {
+  remote_poller.DrivePort(
+    fetch_start_page_token: fn() { Ok("tok-boot") },
+    fetch_all_changes: fn(_page_token) { Error("not under test") },
+  )
+}
 
-  // The state owner does real (in-memory) work: page token round-trip…
+pub fn daemon_tree_starts_and_actors_respond_test() {
+  let deliver = process.new_subject()
+  let assert Ok(daemon) =
+    supervision.start_daemon(
+      store: an_ephemeral_store(),
+      drive: an_idle_drive_port(),
+      deliver_changes: deliver,
+    )
+
+  // No page token yet, so the first poll bootstraps one through the tree:
+  // poller → drive port → state owner.
   assert process.call(
       daemon.state_owner,
       call_timeout,
       state_owner.GetPageToken,
     )
     == None
+  process.send(daemon.remote_poller, remote_poller.Poll)
+  assert wait_for_page_token(daemon.state_owner, Some("tok-boot"))
+
+  // The state owner does real (in-memory) work: page token round-trip…
   process.send(daemon.state_owner, state_owner.SetPageToken("token-1"))
   assert process.call(
       daemon.state_owner,
@@ -62,12 +80,33 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
     ))
     == None
 
-  // The four stubs are alive under the supervisor and answer a ping.
+  // The remaining stubs are alive under the supervisor and answer a ping.
   assert process.call(daemon.local_watcher, call_timeout, local_watcher.Ping)
-    == Nil
-  assert process.call(daemon.remote_poller, call_timeout, remote_poller.Ping)
     == Nil
   assert process.call(daemon.reconciler, call_timeout, reconciler.Ping) == Nil
   assert process.call(daemon.transfer_pool, call_timeout, transfer_pool.Ping)
     == Nil
+}
+
+fn wait_for_page_token(
+  owner: process.Subject(state_owner.Command),
+  expected: option.Option(String),
+) -> Bool {
+  retry_until(40, fn() {
+    process.call(owner, call_timeout, state_owner.GetPageToken) == expected
+  })
+}
+
+fn retry_until(attempts: Int, check: fn() -> Bool) -> Bool {
+  case check() {
+    True -> True
+    False ->
+      case attempts <= 1 {
+        True -> False
+        False -> {
+          process.sleep(25)
+          retry_until(attempts - 1, check)
+        }
+      }
+  }
 }
