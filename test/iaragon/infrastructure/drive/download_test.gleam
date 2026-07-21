@@ -41,6 +41,30 @@ pub fn missing_parent_directories_are_created_test() {
   assert simplifile.read(destination) == Ok("nested")
 }
 
+pub fn redownloading_replaces_the_previous_content_test() {
+  // Erlang's httpc {stream, path} APPENDS to an existing file — caught live
+  // when this suite ran twice. Downloads must go to a partial file that is
+  // renamed over the destination.
+  let destination = scratch_dir <> "/replace/report.txt"
+  let first = serve_once(200, "first")
+  let assert Ok(Nil) =
+    download.fetch_file_to_disk(
+      url: a_local_url(first),
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+  let second = serve_once(200, "second")
+  let assert Ok(Nil) =
+    download.fetch_file_to_disk(
+      url: a_local_url(second),
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+  assert simplifile.read(destination) == Ok("second")
+}
+
 pub fn a_refusal_reports_the_status_and_writes_nothing_test() {
   let port = serve_once(404, "not found")
   let destination = scratch_dir <> "/refused/report.txt"

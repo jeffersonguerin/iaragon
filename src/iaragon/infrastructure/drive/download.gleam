@@ -24,10 +24,29 @@ pub fn fetch_file_to_disk(
   use Nil <- result.try(
     simplifile.create_directory_all(filepath.directory_name(destination))
     |> result.map_error(fn(error) {
-      TransportFailed("cannot create directory: " <> simplifile.describe_error(error))
+      TransportFailed(
+        "cannot create directory: " <> simplifile.describe_error(error),
+      )
     }),
   )
-  download_to_file(url, "Bearer " <> access_token, destination, timeout_ms)
+  // httpc's {stream, path} APPENDS to an existing file, so bytes go to a
+  // partial file that atomically replaces the destination only on success —
+  // a crashed download never leaves a half-written mirror file behind.
+  let partial = destination <> ".iaragon-partial"
+  let _ = simplifile.delete(partial)
+  case download_to_file(url, "Bearer " <> access_token, partial, timeout_ms) {
+    Ok(Nil) ->
+      simplifile.rename(at: partial, to: destination)
+      |> result.map_error(fn(error) {
+        TransportFailed(
+          "cannot move download in place: " <> simplifile.describe_error(error),
+        )
+      })
+    Error(error) -> {
+      let _ = simplifile.delete(partial)
+      Error(error)
+    }
+  }
 }
 
 @external(erlang, "iaragon_download_ffi", "download_to_file")
