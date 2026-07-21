@@ -95,7 +95,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     SeedMirror(root_id, files) -> {
       let model =
@@ -203,7 +206,10 @@ fn plan_remote_files(
   let resolved = paths.resolve_paths(nodes, root_id)
 
   list.filter_map(sightings, fn(sighting) {
-    case classify_mime(sighting.mime_type), dict.get(resolved, sighting.file_id) {
+    case
+      classify_mime(sighting.mime_type),
+      dict.get(resolved, sighting.file_id)
+    {
       Some(kind), Ok(path) ->
         Ok(RemoteFile(
           file_id: sighting.file_id,
@@ -259,8 +265,7 @@ fn hash_never_synced_twins(
 
   list.map(locals, fn(local) {
     let is_twin =
-      dict.has_key(never_synced_remote_paths, local.path)
-      && local.md5 == None
+      dict.has_key(never_synced_remote_paths, local.path) && local.md5 == None
     case is_twin {
       False -> local
       True ->

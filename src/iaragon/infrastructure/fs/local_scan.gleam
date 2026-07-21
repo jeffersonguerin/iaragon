@@ -38,6 +38,8 @@ fn strip_root(path: String, root_dir: String) -> String {
   }
 }
 
-fn describe_error(result: Result(a, simplifile.FileError)) -> Result(a, String) {
+fn describe_error(
+  result: Result(a, simplifile.FileError),
+) -> Result(a, String) {
   result.map_error(result, simplifile.describe_error)
 }

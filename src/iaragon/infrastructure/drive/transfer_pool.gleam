@@ -64,7 +64,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     EnqueueDownload(remote) -> run_download(state, remote, 0)
     RetryDownload(remote, failed_attempts) ->
@@ -107,22 +110,23 @@ fn run_download(
   }
 }
 
-fn materialize(config: TransferConfig, remote: RemoteFile) -> Result(Nil, String) {
+fn materialize(
+  config: TransferConfig,
+  remote: RemoteFile,
+) -> Result(Nil, String) {
   let destination = config.root_dir <> "/" <> remote.path
   use Nil <- result.try(
     simplifile.create_directory_all(filepath.directory_name(destination))
     |> describe_error,
   )
   case remote.kind {
-    Folder ->
-      simplifile.create_directory_all(destination) |> describe_error
+    Folder -> simplifile.create_directory_all(destination) |> describe_error
     Blob -> config.fetch_to_disk(remote.file_id, destination)
     // Export policies still materialise as links for now: exports are the
     // upload-phase FFI's sibling and land together with it. A link is safe —
     // never lossy, never overwritten by accident.
     GoogleNative -> write_link_file(destination, remote.name, remote.file_id)
-    Shortcut(target_id) ->
-      write_link_file(destination, remote.name, target_id)
+    Shortcut(target_id) -> write_link_file(destination, remote.name, target_id)
   }
 }
 
@@ -163,6 +167,8 @@ fn record_known(config: TransferConfig, remote: RemoteFile) -> Nil {
   )
 }
 
-fn describe_error(result: Result(a, simplifile.FileError)) -> Result(a, String) {
+fn describe_error(
+  result: Result(a, simplifile.FileError),
+) -> Result(a, String) {
   result.map_error(result, simplifile.describe_error)
 }

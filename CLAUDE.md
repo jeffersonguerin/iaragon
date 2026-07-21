@@ -140,39 +140,52 @@ de arquivos.
 3. Bidirecional com detecção de conflito
 4. Overlays no gerenciador de arquivos
 
-Feito até aqui: scaffold; domínio puro (`SyncDecision` + `reconcile` +
-`reconcile_all` + `paths.resolve_paths` — mapeamento fileId→POSIX com
-desambiguação determinística) com testes; **OAuth desktop completo**
-(PKCE RFC 7636, loopback via FFI gen_tcp, troca/refresh, stores chmod 600,
-`token_manager` com refresh automático por margem de 60 s); **cliente da
-Changes API** (startPageToken, paginação até newStartPageToken, backoff puro);
-**persistência SQLite** (`infrastructure/persistence/state_db`, write-through
-no `state_owner` via porta `StateStore` definida na application); **download
-streaming a disco** (FFI httpc, parcial+rename); **remote_poller real**
-(bootstrap do token, fetch→deliver→advance, retry com backoff injetado,
-re-poll por intervalo — 30 s na composição). HTTP é sempre injetado
-(`SendRequest`); só `login.gleam` e o composition root tocam a rede.
+**Download-only FUNCIONAL de ponta a ponta.** Feito: domínio puro
+(`SyncDecision`, `reconcile`/`reconcile_all`, `paths.resolve_paths`); OAuth
+desktop completo (PKCE, loopback FFI, `token_manager` com refresh por margem
+de 60 s); clientes Drive (Changes paginado, `files.list` + `files/root` em
+`drive/listing`); persistência SQLite (write-through via porta `StateStore`);
+download streaming (FFI httpc, parcial+rename); scan local
+(`fs/local_scan`, exclui `.iaragon-partial`) e md5 sob demanda
+(`fs/hashing`); **pipeline completo**: `remote_poller` (1º ciclo SEMPRE
+semeia: token → snapshot `files.list`+root id → `SeedMirror`; depois
+`ApplyRemoteChanges`; entrega ANTES de avançar o token) → `reconciler`
+(modelo remoto em memória, resolve paths, hash de gêmeos nunca-sincados,
+despacha por funções injetadas; UploadLocal/DeleteRemote/Conflict ignorados
+nesta fase) → `transfer_pool` (blob/folder/nativo-link/shortcut-link, delete
+local, `PutKnown` pós-sucesso, retry limitado 4x) → `state_owner`.
+
+Regra DDD aplicada no pipeline: o reconciler define os contratos de intake
+(`RemoteSighting`/`RemoteObservation`) e o poller traduz o formato do Drive
+para eles; despachos saem por records de função (a composição embrulha o
+subject do pool). Espelho local: `~/GoogleDrive` (composition root); nativos
+materializam como links `.desktop` (`https://drive.google.com/open?id=…`)
+com sufixo `.desktop` decidido no reconciler.
 
 Login interativo: `gleam run -m iaragon/login`. Config em `~/.config/iaragon/`:
 `oauth_client.json` (`{"client_id":…,"client_secret":…}` de um client
 "Desktop app" do Google Cloud, criado à mão) e `tokens.json` (gerado, 600).
-Estado do daemon: `~/.local/share/iaragon/state.db` (SQLite). O daemon boota
-sem credenciais (a porta Drive carrega tudo lazy e o poller só age sob `Poll`
-— ninguém envia `Poll` ainda; o pipeline liga na próxima sessão).
+Estado do daemon: `~/.local/share/iaragon/state.db` (SQLite). `gleam run`
+sobe a árvore e o main envia o primeiro `Poll` — sem credenciais, o poller
+só fica em retry (a porta Drive carrega tudo lazy).
 
-**Próxima sessão (fecha o download-only)**: listagem inicial completa
-(`files.list` — o primeiro espelho não vem da Changes API), pipeline
-poller→reconciler→transfer_pool (reconciler consumindo `deliver_changes`,
-compondo `paths.resolve_paths` + `reconcile_all` e despachando
-`DownloadRemote`/`DeleteLocal` para o pool com `download.fetch_file_to_disk`),
-scan local (size+mtime, md5 sob demanda) e materialização de nativos conforme
-`NativeDocPolicy` (LinkFile default). Depois: upload (resumable), watcher
-inotify, bidirecional.
+Limitações conhecidas (para as próximas sessões): modelo remoto do reconciler
+é só memória (crash do reconciler = mudanças ignoradas até novo seed/restart);
+adoção de gêmeos idênticos não grava `PutKnown` (re-hash a cada rodada — falta
+uma decisão de bookkeeping no domínio); shortcuts ficam fora do espelho
+(precisam de `shortcutDetails` na projeção); export de nativos
+(ExportOffice/ExportOdf) ainda materializa como link.
+
+**Próximas sessões**: fase upload (upload resumable via FFI — chunks 256 KB —,
+UploadLocal/DeleteRemote reais, `files.create`/`files.update`), watcher
+inotify real (filespy) disparando rodadas locais, bidirecional com resolução
+de conflito, e as limitações acima.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
-JSON do Drive; `changes.list` recebe `fields` com a projeção exata usada no
-parser; um redirect OAuth sem `code`/`error` é malformado, e state errado
-invalida qualquer resultado; httpc `{stream, path}` faz append (ver FFI).
+JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
+exata usada no parser; um redirect OAuth sem `code`/`error` é malformado, e
+state errado invalida qualquer resultado; httpc `{stream, path}` faz append
+(ver FFI); md5 local em hex minúsculo como o Drive reporta.
 
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 

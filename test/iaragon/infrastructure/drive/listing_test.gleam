@@ -2,7 +2,7 @@ import gleam/erlang/process
 import gleam/http/request
 import gleam/http/response
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/string
 import gleam/uri
 import iaragon/infrastructure/drive/changes.{ChangedFile}

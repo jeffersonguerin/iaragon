@@ -73,7 +73,10 @@ pub fn start_daemon(
     reconciler.ReconcilerConfig(
       state_owner: process.named_subject(state_owner_name),
       dispatch_download: fn(remote) {
-        process.send(transfer_pool_subject, transfer_pool.EnqueueDownload(remote))
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueDownload(remote),
+        )
       },
       dispatch_delete_local: fn(file_id, path) {
         process.send(

@@ -20,9 +20,9 @@ pub fn files_are_listed_recursively_with_relative_paths_test() {
       string.compare(a.path, b.path)
     })
   let assert [
-      LocalFile(path: "a.txt", size: 2, md5: None, mtime_seconds: mtime_a),
-      LocalFile(path: "docs/b.txt", size: 3, md5: None, mtime_seconds: mtime_b),
-    ] = by_path
+    LocalFile(path: "a.txt", size: 2, md5: None, mtime_seconds: mtime_a),
+    LocalFile(path: "docs/b.txt", size: 3, md5: None, mtime_seconds: mtime_b),
+  ] = by_path
   assert mtime_a > 0
   assert mtime_b > 0
 }
@@ -43,4 +43,3 @@ pub fn a_missing_mirror_root_is_created_empty_test() {
   let assert Ok([]) = local_scan.scan_mirror(root)
   assert simplifile.is_directory(root) == Ok(True)
 }
-

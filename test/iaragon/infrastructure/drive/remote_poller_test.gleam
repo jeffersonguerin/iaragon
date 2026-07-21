@@ -1,5 +1,5 @@
 import gleam/erlang/process.{type Subject}
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import iaragon/application/reconciler
 import iaragon/application/state_owner
 import iaragon/infrastructure/drive/changes.{Removed}
@@ -185,8 +185,10 @@ pub fn polling_repeats_on_the_configured_interval_test() {
 
   // Seed on the first cycle, then interval-driven change deliveries.
   let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)
-  let assert Ok(reconciler.ApplyRemoteChanges(_)) = process.receive(deliver, 1000)
-  let assert Ok(reconciler.ApplyRemoteChanges(_)) = process.receive(deliver, 1000)
+  let assert Ok(reconciler.ApplyRemoteChanges(_)) =
+    process.receive(deliver, 1000)
+  let assert Ok(reconciler.ApplyRemoteChanges(_)) =
+    process.receive(deliver, 1000)
 }
 
 fn wait_for_page_token(

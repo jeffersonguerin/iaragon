@@ -53,7 +53,8 @@ fn start_pool(
 
 fn a_working_fetch() -> fn(String, String) -> Result(Nil, String) {
   fn(_file_id, destination) {
-    let assert Ok(Nil) = simplifile.write(to: destination, contents: "hello bytes")
+    let assert Ok(Nil) =
+      simplifile.write(to: destination, contents: "hello bytes")
     Ok(Nil)
   }
 }
@@ -69,7 +70,10 @@ pub fn a_downloaded_blob_is_recorded_as_known_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let #(pool, root) = start_pool("blob", owner, a_working_fetch())
 
-  process.send(pool, transfer_pool.EnqueueDownload(a_remote("id-1", "docs/report.txt")))
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(a_remote("id-1", "docs/report.txt")),
+  )
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
   assert simplifile.read(root <> "/docs/report.txt") == Ok("hello bytes")
@@ -162,7 +166,10 @@ pub fn failed_downloads_are_retried_until_success_test() {
   }
   let #(pool, root) = start_pool("retry", owner, fetch)
 
-  process.send(pool, transfer_pool.EnqueueDownload(a_remote("id-1", "flaky.txt")))
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(a_remote("id-1", "flaky.txt")),
+  )
 
   assert fakes.retry_until(80, fn() { known_of(owner, "id-1") != None })
   assert simplifile.read(root <> "/flaky.txt") == Ok("ok!")
@@ -173,7 +180,10 @@ pub fn downloads_that_keep_failing_are_dropped_not_crashed_test() {
   let fetch = fn(_file_id, _destination) { Error("always down") }
   let #(pool, _root) = start_pool("give-up", owner, fetch)
 
-  process.send(pool, transfer_pool.EnqueueDownload(a_remote("id-1", "never.txt")))
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(a_remote("id-1", "never.txt")),
+  )
   // Give the retries time to burn out, then prove the pool is still alive
   // and never recorded the failed download.
   process.sleep(300)

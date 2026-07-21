@@ -14,9 +14,9 @@
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/result
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
+import gleam/result
 import iaragon/application/reconciler.{
   type RemoteObservation, type RemoteSighting,
 }
@@ -81,7 +81,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     Poll -> {
       let outcome = case state.seeded {
@@ -91,9 +94,7 @@ fn handle_command(state: State, command: Command) -> actor.Next(State, Command) 
       case outcome {
         Ok(Nil) -> {
           process.send_after(state.self, state.config.poll_interval_ms, Poll)
-          actor.continue(
-            State(..state, failed_attempts: 0, seeded: True),
-          )
+          actor.continue(State(..state, failed_attempts: 0, seeded: True))
         }
         Error(_reason) -> {
           let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
@@ -129,7 +130,9 @@ fn ensure_page_token(config: PollerConfig) -> Result(Nil, String) {
 fn advance_changes(config: PollerConfig) -> Result(Nil, String) {
   let assert Some(page_token) =
     process.call(config.state_owner, 5000, state_owner.GetPageToken)
-  use #(changes, fresh_token) <- result.try(config.drive.fetch_all_changes(page_token))
+  use #(changes, fresh_token) <- result.try(config.drive.fetch_all_changes(
+    page_token,
+  ))
   case changes {
     [] -> Nil
     changes ->

@@ -18,7 +18,11 @@ type Dispatch {
   DeleteLocalDispatched(file_id: String, path: String)
 }
 
-fn a_sighting(file_id: String, name: String, parent: String) -> reconciler.RemoteSighting {
+fn a_sighting(
+  file_id: String,
+  name: String,
+  parent: String,
+) -> reconciler.RemoteSighting {
   RemoteSighting(
     file_id: file_id,
     name: name,
@@ -31,7 +35,11 @@ fn a_sighting(file_id: String, name: String, parent: String) -> reconciler.Remot
   )
 }
 
-fn a_folder_sighting(file_id: String, name: String, parent: String) -> reconciler.RemoteSighting {
+fn a_folder_sighting(
+  file_id: String,
+  name: String,
+  parent: String,
+) -> reconciler.RemoteSighting {
   RemoteSighting(
     ..a_sighting(file_id, name, parent),
     mime_type: "application/vnd.google-apps.folder",
@@ -84,7 +92,8 @@ pub fn seeding_downloads_the_whole_remote_test() {
   let downloads =
     list.filter_map([first, second], fn(dispatch) {
       case dispatch {
-        DownloadDispatched(remote) -> Ok(#(remote.file_id, remote.path, remote.kind))
+        DownloadDispatched(remote) ->
+          Ok(#(remote.file_id, remote.path, remote.kind))
         _ -> Error(Nil)
       }
     })
@@ -168,7 +177,8 @@ pub fn a_trashed_file_counts_as_removed_test() {
     reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
   )
 
-  let trashed = RemoteSighting(..a_sighting("id-1", "report.txt", "root"), trashed: True)
+  let trashed =
+    RemoteSighting(..a_sighting("id-1", "report.txt", "root"), trashed: True)
   process.send(sut, reconciler.ApplyRemoteChanges([ObservedFile(trashed)]))
 
   assert process.receive(dispatches, 1000)
