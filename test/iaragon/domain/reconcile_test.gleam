@@ -1,6 +1,7 @@
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
-  Conflict, DownloadRemote, EditEdit, ForgetKnown, Noop, UploadLocal,
+  Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit, ForgetKnown,
+  LocalEditRemoteDelete, Noop, RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{Blob, KnownFile, LocalFile, RemoteFile}
 import iaragon/domain/reconcile
@@ -106,4 +107,44 @@ pub fn touched_local_file_with_same_content_noops_test() {
   let local = LocalFile(..a_local(), mtime_seconds: 2000)
   assert reconcile.reconcile(Some(local), Some(a_remote()), Some(a_known()))
     == Noop
+}
+
+// --- Deletions ---------------------------------------------------------------
+
+pub fn deleted_locally_propagates_delete_remote_test() {
+  assert reconcile.reconcile(None, Some(a_remote()), Some(a_known()))
+    == DeleteRemote("id-1")
+}
+
+pub fn deleted_remotely_propagates_delete_local_test() {
+  assert reconcile.reconcile(Some(a_local()), None, Some(a_known()))
+    == DeleteLocal("docs/report.txt")
+}
+
+pub fn trashed_remotely_counts_as_remote_delete_test() {
+  // Verified Drive API v3 fact: trashing arrives as an ordinary change with
+  // file.trashed=true, not as removed=true. The domain treats it as absence.
+  let remote = RemoteFile(..a_remote(), trashed: True)
+  assert reconcile.reconcile(Some(a_local()), Some(remote), Some(a_known()))
+    == DeleteLocal("docs/report.txt")
+}
+
+pub fn local_edit_with_remote_delete_conflicts_test() {
+  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  assert reconcile.reconcile(Some(local), None, Some(a_known()))
+    == Conflict("docs/report.txt", "id-1", LocalEditRemoteDelete)
+}
+
+pub fn remote_edit_with_local_delete_conflicts_test() {
+  let remote =
+    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+  assert reconcile.reconcile(None, Some(remote), Some(a_known()))
+    == Conflict("docs/report.txt", "id-1", RemoteEditLocalDelete)
+}
+
+pub fn trashed_remote_of_unknown_file_noops_test() {
+  // A file we never synced got trashed remotely: nothing to mirror, nothing
+  // to forget.
+  let remote = RemoteFile(..a_remote(), trashed: True)
+  assert reconcile.reconcile(None, Some(remote), None) == Noop
 }

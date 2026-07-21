@@ -7,7 +7,8 @@
 
 import gleam/option.{type Option, None, Some}
 import iaragon/domain/decision.{
-  type SyncDecision, Conflict, DownloadRemote, EditEdit, ForgetKnown, Noop,
+  type SyncDecision, Conflict, DeleteLocal, DeleteRemote, DownloadRemote,
+  EditEdit, ForgetKnown, LocalEditRemoteDelete, Noop, RemoteEditLocalDelete,
   UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
@@ -17,14 +18,33 @@ pub fn reconcile(
   remote: Option(RemoteFile),
   last: Option(KnownFile),
 ) -> SyncDecision {
+  // Trashing arrives from the Changes API as an ordinary change with
+  // trashed=true (removed=true is only for permanent deletion / lost access),
+  // so a trashed remote is reconciled as an absent remote.
+  let remote = case remote {
+    Some(r) ->
+      case r.trashed {
+        True -> None
+        False -> Some(r)
+      }
+    None -> None
+  }
   case local, remote, last {
     None, None, None -> Noop
     Some(l), None, None -> UploadLocal(l.path)
     None, Some(r), None -> DownloadRemote(r.file_id, r.path)
     None, None, Some(k) -> ForgetKnown(k.file_id)
     Some(_l), Some(_r), None -> todo as "both created, no last known state"
-    Some(_l), None, Some(_k) -> todo as "remote gone"
-    None, Some(_r), Some(_k) -> todo as "local gone"
+    Some(l), None, Some(k) ->
+      case detect_local_change(l, k) {
+        False -> DeleteLocal(k.path)
+        True -> Conflict(k.path, k.file_id, LocalEditRemoteDelete)
+      }
+    None, Some(r), Some(k) ->
+      case detect_remote_change(r, k) {
+        False -> DeleteRemote(r.file_id)
+        True -> Conflict(k.path, k.file_id, RemoteEditLocalDelete)
+      }
     Some(l), Some(r), Some(k) ->
       case detect_local_change(l, k), detect_remote_change(r, k) {
         False, False -> Noop
