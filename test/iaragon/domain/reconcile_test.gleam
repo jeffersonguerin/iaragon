@@ -1,6 +1,6 @@
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
-  DownloadRemote, ForgetKnown, Noop, UploadLocal,
+  Conflict, DownloadRemote, EditEdit, ForgetKnown, Noop, UploadLocal,
 }
 import iaragon/domain/entry.{Blob, KnownFile, LocalFile, RemoteFile}
 import iaragon/domain/reconcile
@@ -59,4 +59,51 @@ pub fn gone_on_both_sides_forgets_known_test() {
 
 pub fn absent_everywhere_noops_test() {
   assert reconcile.reconcile(None, None, None) == Noop
+}
+
+// --- Change detection with all three present --------------------------------
+
+pub fn unchanged_everywhere_noops_test() {
+  assert reconcile.reconcile(Some(a_local()), Some(a_remote()), Some(a_known()))
+    == Noop
+}
+
+pub fn modified_only_locally_uploads_test() {
+  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  assert reconcile.reconcile(Some(local), Some(a_remote()), Some(a_known()))
+    == UploadLocal("docs/report.txt")
+}
+
+pub fn modified_only_remotely_downloads_test() {
+  let remote =
+    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+  assert reconcile.reconcile(Some(a_local()), Some(remote), Some(a_known()))
+    == DownloadRemote("id-1", "docs/report.txt")
+}
+
+pub fn modified_on_both_sides_conflicts_test() {
+  let local = LocalFile(..a_local(), size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let remote =
+    RemoteFile(..a_remote(), md5: Some("ccc"), modified_time: "2026-07-02T09:00:00Z")
+  assert reconcile.reconcile(Some(local), Some(remote), Some(a_known()))
+    == Conflict("docs/report.txt", "id-1", EditEdit)
+}
+
+pub fn modified_on_both_sides_to_same_content_noops_test() {
+  let local = LocalFile(..a_local(), size: 50, mtime_seconds: 2000, md5: Some("ddd"))
+  let remote =
+    RemoteFile(
+      ..a_remote(),
+      size: Some(50),
+      md5: Some("ddd"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
+  assert reconcile.reconcile(Some(local), Some(remote), Some(a_known())) == Noop
+}
+
+pub fn touched_local_file_with_same_content_noops_test() {
+  // mtime changed but the bytes did not (e.g. `touch`): md5 breaks the tie.
+  let local = LocalFile(..a_local(), mtime_seconds: 2000)
+  assert reconcile.reconcile(Some(local), Some(a_remote()), Some(a_known()))
+    == Noop
 }
