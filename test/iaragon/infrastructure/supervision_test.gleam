@@ -107,10 +107,13 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
     != None
   })
 
-  // The remaining stubs are alive under the supervisor and answer a ping.
+  // The reconciler is alive: a seed with an empty remote and empty mirror
+  // reconciles to nothing but proves the round-trip through the tree.
+  process.send(daemon.reconciler, reconciler.SeedMirror("root", []))
+
+  // The last stub is alive under the supervisor and answers a ping.
   assert process.call(daemon.local_watcher, call_timeout, local_watcher.Ping)
     == Nil
-  assert process.call(daemon.reconciler, call_timeout, reconciler.Ping) == Nil
 }
 
 fn wait_for_page_token(

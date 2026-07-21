@@ -14,6 +14,8 @@ import iaragon/infrastructure/drive/backoff
 import iaragon/infrastructure/drive/changes.{type Change}
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
+import iaragon/infrastructure/fs/hashing
+import iaragon/infrastructure/fs/local_scan
 import iaragon/infrastructure/fs/local_watcher
 
 pub type Daemon {
@@ -67,6 +69,23 @@ pub fn start_daemon(
         backoff.compute_delay_ms(attempt, int.random(1000))
       },
     )
+  let transfer_pool_subject = process.named_subject(transfer_pool_name)
+  let reconciler_config =
+    reconciler.ReconcilerConfig(
+      state_owner: process.named_subject(state_owner_name),
+      dispatch_download: fn(remote) {
+        process.send(transfer_pool_subject, transfer_pool.EnqueueDownload(remote))
+      },
+      dispatch_delete_local: fn(file_id, path) {
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueDeleteLocal(file_id, path),
+        )
+      },
+      scan_local: fn() { local_scan.scan_mirror(mirror_root) },
+      hash_local_file: fn(path) { hashing.hash_mirror_file(mirror_root, path) },
+      native_policy: native_policy,
+    )
 
   static_supervisor.new(static_supervisor.OneForOne)
   |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
@@ -75,7 +94,10 @@ pub fn start_daemon(
     remote_poller_name,
     poller_config,
   ))
-  |> static_supervisor.add(reconciler.supervised(reconciler_name))
+  |> static_supervisor.add(reconciler.supervised(
+    reconciler_name,
+    reconciler_config,
+  ))
   |> static_supervisor.add(transfer_pool.supervised(
     transfer_pool_name,
     transfer_config,
