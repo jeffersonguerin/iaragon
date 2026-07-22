@@ -104,7 +104,10 @@ fn weave_id(name: String, file_id: String) -> String {
   }
 }
 
-fn split_extension(name: String) -> #(String, String) {
+/// Split a file name at the last dot: #(stem, extension). Dotfiles and
+/// extensionless names come back whole with an empty extension. Public
+/// because conflicted-copy naming reuses the same rule.
+pub fn split_extension(name: String) -> #(String, String) {
   case string.split_once(string.reverse(name), ".") {
     Ok(#(reversed_extension, reversed_stem)) ->
       case reversed_stem {
