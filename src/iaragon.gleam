@@ -6,6 +6,7 @@
 //// simply fail (and retry) until tokens exist.
 
 import envoy
+import gleam/bit_array
 import gleam/erlang/process
 import gleam/float
 import gleam/http/request.{type Request}
@@ -21,7 +22,10 @@ import iaragon/infrastructure/auth/token_manager
 import iaragon/infrastructure/drive/changes
 import iaragon/infrastructure/drive/download
 import iaragon/infrastructure/drive/listing
+import iaragon/infrastructure/drive/mutate
 import iaragon/infrastructure/drive/remote_poller
+import iaragon/infrastructure/drive/transfer_pool
+import iaragon/infrastructure/drive/upload
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
 import simplifile
@@ -38,7 +42,7 @@ pub fn main() -> Nil {
       store: state_db.build_state_store(db),
       drive: build_drive_port(config_dir),
       mirror_root: home <> "/GoogleDrive",
-      fetch_to_disk: build_fetch_to_disk(config_dir),
+      transfers: build_transfer_ops(config_dir),
       native_policy: entry.default_native_doc_policy(),
     )
   // Kick the pipeline: seed on the first cycle, then poll every interval.
@@ -46,23 +50,70 @@ pub fn main() -> Nil {
   process.sleep_forever()
 }
 
-fn build_fetch_to_disk(
-  config_dir: String,
-) -> fn(String, String) -> Result(Nil, String) {
-  fn(file_id, destination) {
-    use access_token <- result.try(obtain_access_token(config_dir))
-    download.fetch_file_to_disk(
-      url: download.build_media_url(file_id),
-      access_token: access_token,
-      destination: destination,
-      timeout_ms: download_timeout_ms,
-    )
-    |> result.map_error(string.inspect)
-  }
+fn build_transfer_ops(config_dir: String) -> transfer_pool.DriveTransferOps {
+  transfer_pool.DriveTransferOps(
+    fetch_to_disk: fn(file_id, destination) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      download.fetch_file_to_disk(
+        url: download.build_media_url(file_id),
+        access_token: access_token,
+        destination: destination,
+        timeout_ms: download_timeout_ms,
+      )
+      |> result.map_error(string.inspect)
+    },
+    upload_to_drive: fn(target, source, size) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      upload.upload_file(
+        send_bits_over_httpc,
+        access_token: access_token,
+        target: target,
+        source_path: source,
+        total_size: size,
+        chunk_size: upload_chunk_bytes,
+      )
+      |> result.map_error(string.inspect)
+    },
+    create_remote_folder: fn(name, parent_id) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      mutate.create_folder(
+        send_over_httpc,
+        access_token: access_token,
+        name: name,
+        parent_id: parent_id,
+      )
+      |> result.map_error(string.inspect)
+    },
+    trash_remote: fn(file_id) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      mutate.trash_file(
+        send_over_httpc,
+        access_token: access_token,
+        file_id: file_id,
+      )
+      |> result.map_error(string.inspect)
+    },
+  )
 }
 
 /// Generous: big files over slow links; the stream writes as it goes.
 const download_timeout_ms = 3_600_000
+
+/// 32 × 256 KB — resumable chunks must be 256 KB multiples.
+const upload_chunk_bytes = 8_388_608
+
+fn send_bits_over_httpc(
+  request: Request(BitArray),
+) -> Result(Response(String), String) {
+  use response <- result.try(
+    httpc.send_bits(request) |> result.map_error(string.inspect),
+  )
+  use body <- result.try(
+    bit_array.to_string(response.body)
+    |> result.replace_error("non-utf8 response body"),
+  )
+  Ok(response.Response(..response, body: body))
+}
 
 fn build_drive_port(config_dir: String) -> remote_poller.DrivePort {
   remote_poller.DrivePort(

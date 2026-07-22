@@ -34,7 +34,14 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       store: an_ephemeral_store(),
       drive: an_idle_drive_port(),
       mirror_root: "build/test-scratch/supervision/mirror",
-      fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
+      transfers: transfer_pool.DriveTransferOps(
+        fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
+        upload_to_drive: fn(_target, _source, _size) {
+          Error("not under test")
+        },
+        create_remote_folder: fn(_name, _parent) { Error("not under test") },
+        trash_remote: fn(_file_id) { Error("not under test") },
+      ),
       native_policy: entry.LinkFile,
     )
 

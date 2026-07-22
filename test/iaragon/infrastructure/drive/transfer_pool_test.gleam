@@ -1,11 +1,14 @@
 import gleam/erlang/process.{type Subject}
 import gleam/option.{None, Some}
 import gleam/string
+import iaragon/application/reconciler.{RemoteSighting, UploadPlan}
 import iaragon/application/state_owner
 import iaragon/domain/entry.{
-  Blob, Folder, GoogleNative, LinkFile, RemoteFile, Shortcut,
+  Blob, Folder, GoogleNative, LinkFile, LocalFile, RemoteFile, Shortcut,
 }
+import iaragon/infrastructure/drive/changes
 import iaragon/infrastructure/drive/transfer_pool.{TransferConfig}
+import iaragon/infrastructure/drive/upload.{CreateFile, UpdateFile}
 import simplifile
 import support/fakes
 
@@ -30,25 +33,67 @@ fn a_remote(file_id: String, path: String) -> entry.RemoteFile {
   )
 }
 
+type UploadEvent {
+  UploadCalled(target: upload.UploadTarget, source: String, size: Int)
+  FolderCreated(name: String, parent_id: String)
+  TrashCalled(file_id: String)
+  UploadSettled(path: String, outcome: Result(reconciler.RemoteSighting, String))
+  TrashSettled(file_id: String, outcome: Result(Nil, String))
+  FolderObserved(sighting: reconciler.RemoteSighting)
+}
+
+fn an_uploaded_file(file_id: String, name: String) -> changes.ChangedFile {
+  changes.ChangedFile(
+    file_id: file_id,
+    name: name,
+    mime_type: "text/plain",
+    parent_id: Some("p-1"),
+    modified_time: "2026-07-22T10:00:00Z",
+    size: Some(3),
+    md5: Some("m-up"),
+    trashed: False,
+  )
+}
+
+fn a_pool_config(
+  root: String,
+  owner: Subject(state_owner.Command),
+  fetch: fn(String, String) -> Result(Nil, String),
+) -> transfer_pool.TransferConfig {
+  TransferConfig(
+    root_dir: root,
+    fetch_to_disk: fetch,
+    upload_to_drive: fn(_target, _source, _size) {
+      panic as "no upload expected in this test"
+    },
+    create_remote_folder: fn(_name, _parent) {
+      panic as "no folder creation expected in this test"
+    },
+    trash_remote: fn(_file_id) { panic as "no trash expected in this test" },
+    settle_upload: fn(_path, _outcome) { Nil },
+    settle_trash: fn(_file_id, _outcome) { Nil },
+    observe_folder: fn(_sighting) { Nil },
+    state_owner: owner,
+    native_policy: LinkFile,
+    pick_retry_delay_ms: fn(_attempt) { 25 },
+  )
+}
+
+fn start_pool_with(
+  config: transfer_pool.TransferConfig,
+) -> Subject(transfer_pool.Command) {
+  let name = process.new_name(prefix: "transfer_pool_test")
+  let assert Ok(_) = transfer_pool.start(name, config)
+  process.named_subject(name)
+}
+
 fn start_pool(
   case_name: String,
   owner: Subject(state_owner.Command),
   fetch: fn(String, String) -> Result(Nil, String),
 ) -> #(Subject(transfer_pool.Command), String) {
   let root = scratch_dir <> "/" <> case_name
-  let name = process.new_name(prefix: "transfer_pool_test")
-  let assert Ok(_) =
-    transfer_pool.start(
-      name,
-      TransferConfig(
-        root_dir: root,
-        fetch_to_disk: fetch,
-        state_owner: owner,
-        native_policy: LinkFile,
-        pick_retry_delay_ms: fn(_attempt) { 25 },
-      ),
-    )
-  #(process.named_subject(name), root)
+  #(start_pool_with(a_pool_config(root, owner, fetch)), root)
 }
 
 fn a_working_fetch() -> fn(String, String) -> Result(Nil, String) {
@@ -173,6 +218,186 @@ pub fn failed_downloads_are_retried_until_success_test() {
 
   assert fakes.retry_until(80, fn() { known_of(owner, "id-1") != None })
   assert simplifile.read(root <> "/flaky.txt") == Ok("ok!")
+}
+
+// --- Uploads ------------------------------------------------------------------
+
+fn a_plan(path: String, name: String) -> reconciler.UploadPlan {
+  UploadPlan(
+    local: LocalFile(path: path, size: 3, mtime_seconds: 1000, md5: None),
+    name: name,
+    existing_file_id: None,
+    anchor_parent_id: "root-1",
+    missing_folders: [],
+  )
+}
+
+pub fn uploading_a_new_file_creates_records_and_settles_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/upload-new"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      upload_to_drive: fn(target, source, size) {
+        process.send(events, UploadCalled(target, source, size))
+        Ok(an_uploaded_file("id-up", "mine.txt"))
+      },
+      settle_upload: fn(path, outcome) {
+        process.send(events, UploadSettled(path, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(pool, transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")))
+
+  let assert Ok(UploadCalled(target, source, 3)) = process.receive(events, 1000)
+  assert target == CreateFile(name: "mine.txt", parent_id: "root-1")
+  assert source == root <> "/mine.txt"
+  let assert Ok(UploadSettled("mine.txt", Ok(sighting))) =
+    process.receive(events, 1000)
+  assert sighting.file_id == "id-up"
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-up") != None })
+  let assert Some(known) = known_of(owner, "id-up")
+  assert known.path == "mine.txt"
+  assert known.md5 == Some("m-up")
+}
+
+pub fn uploading_a_modified_file_updates_in_place_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/upload-update"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      upload_to_drive: fn(target, _source, _size) {
+        process.send(events, UploadCalled(target, "", 0))
+        Ok(an_uploaded_file("id-9", "mine.txt"))
+      },
+      settle_upload: fn(_path, _outcome) { Nil },
+    )
+  let pool = start_pool_with(config)
+  let plan =
+    UploadPlan(..a_plan("mine.txt", "mine.txt"), existing_file_id: Some("id-9"))
+
+  process.send(pool, transfer_pool.EnqueueUpload(plan))
+
+  let assert Ok(UploadCalled(target, _, _)) = process.receive(events, 1000)
+  assert target == UpdateFile(file_id: "id-9")
+}
+
+pub fn missing_folders_are_created_once_and_observed_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/upload-folders"
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/docs")
+  let assert Ok(Nil) = simplifile.write(to: root <> "/docs/a.txt", contents: "abc")
+  let assert Ok(Nil) = simplifile.write(to: root <> "/docs/b.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      create_remote_folder: fn(name, parent_id) {
+        process.send(events, FolderCreated(name, parent_id))
+        Ok(changes.ChangedFile(
+          ..an_uploaded_file("id-docs", name),
+          mime_type: "application/vnd.google-apps.folder",
+          size: None,
+          md5: None,
+        ))
+      },
+      observe_folder: fn(sighting) {
+        process.send(events, FolderObserved(sighting))
+      },
+      upload_to_drive: fn(target, _source, _size) {
+        process.send(events, UploadCalled(target, "", 0))
+        Ok(an_uploaded_file("id-up", "a.txt"))
+      },
+      settle_upload: fn(_path, _outcome) { Nil },
+    )
+  let pool = start_pool_with(config)
+  let first =
+    UploadPlan(..a_plan("docs/a.txt", "a.txt"), missing_folders: ["docs"])
+  let second =
+    UploadPlan(..a_plan("docs/b.txt", "b.txt"), missing_folders: ["docs"])
+
+  process.send(pool, transfer_pool.EnqueueUpload(first))
+  process.send(pool, transfer_pool.EnqueueUpload(second))
+
+  let assert Ok(FolderCreated("docs", "root-1")) = process.receive(events, 1000)
+  let assert Ok(FolderObserved(folder)) = process.receive(events, 1000)
+  assert folder.file_id == "id-docs"
+  // First upload goes into the freshly created folder…
+  let assert Ok(UploadCalled(CreateFile(_, "id-docs"), _, _)) =
+    process.receive(events, 1000)
+  // …and the second reuses the cache: no second FolderCreated event.
+  let assert Ok(UploadCalled(CreateFile(_, "id-docs"), _, _)) =
+    process.receive(events, 1000)
+  assert process.receive(events, 200) == Error(Nil)
+}
+
+pub fn a_failed_upload_retries_then_settles_the_failure_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/upload-fail"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      upload_to_drive: fn(_target, _source, _size) { Error("always down") },
+      settle_upload: fn(path, outcome) {
+        process.send(events, UploadSettled(path, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(pool, transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")))
+
+  let assert Ok(UploadSettled("mine.txt", Error(_))) =
+    process.receive(events, 2000)
+  assert known_of(owner, "id-up") == None
+}
+
+// --- Trash ----------------------------------------------------------------------
+
+pub fn trashing_remotely_forgets_and_settles_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/trash"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      trash_remote: fn(file_id) {
+        process.send(events, TrashCalled(file_id))
+        Ok(Nil)
+      },
+      settle_trash: fn(file_id, outcome) {
+        process.send(events, TrashSettled(file_id, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+  process.send(
+    owner,
+    state_owner.PutKnown(entry.KnownFile(
+      file_id: "id-1",
+      path: "gone.txt",
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: Some("aaa"),
+      size: 3,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )),
+  )
+
+  process.send(pool, transfer_pool.EnqueueTrashRemote("id-1"))
+
+  let assert Ok(TrashCalled("id-1")) = process.receive(events, 1000)
+  let assert Ok(TrashSettled("id-1", Ok(Nil))) = process.receive(events, 1000)
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") == None })
 }
 
 pub fn downloads_that_keep_failing_are_dropped_not_crashed_test() {

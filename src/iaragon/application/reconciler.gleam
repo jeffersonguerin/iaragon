@@ -19,6 +19,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
+import gleam/set.{type Set}
 import gleam/string
 import iaragon/application/state_owner
 import iaragon/domain/decision
@@ -49,6 +50,20 @@ pub type RemoteObservation {
   ObservedRemoval(file_id: String)
 }
 
+/// Everything the transfer side needs to put one local file on Drive:
+/// which bytes, under which name, whether it updates an existing file, and
+/// where it hangs — the deepest ALREADY-EXISTING remote folder plus the
+/// chain of folder names still to be created under it, outermost first.
+pub type UploadPlan {
+  UploadPlan(
+    local: LocalFile,
+    name: String,
+    existing_file_id: Option(String),
+    anchor_parent_id: String,
+    missing_folders: List(String),
+  )
+}
+
 pub type Command {
   /// The full remote snapshot plus the real root id: replaces the model and
   /// runs a reconciliation round.
@@ -56,6 +71,16 @@ pub type Command {
   /// Deltas from the Changes API: update the model and run a round.
   /// Ignored until a seed has arrived (there is no tree to resolve against).
   ApplyRemoteChanges(observations: List(RemoteObservation))
+  /// Outcome of a dispatched upload, reported by the transfer side. Success
+  /// puts the uploaded file straight into the remote model — waiting for the
+  /// next Changes poll would leave a window where the file looks
+  /// remote-absent and gets wrongly deleted locally.
+  SettleUpload(path: String, outcome: Result(RemoteSighting, String))
+  /// Outcome of a dispatched remote trash.
+  SettleTrash(file_id: String, outcome: Result(Nil, String))
+  /// Run a round without new remote input — local edits have no other
+  /// trigger until a filesystem watcher lands.
+  ReconcileNow
 }
 
 pub type ReconcilerConfig {
@@ -75,7 +100,19 @@ type State {
     config: ReconcilerConfig,
     root_id: Option(String),
     model: Dict(String, RemoteSighting),
+    /// Paths with an upload in flight and file ids with a trash in flight:
+    /// never re-dispatched until the transfer side settles them.
+    pending_uploads: Set(String),
+    pending_trashes: Set(String),
   )
+}
+
+fn forget_pending_upload(state: State, path: String) -> State {
+  State(..state, pending_uploads: set.delete(state.pending_uploads, path))
+}
+
+fn forget_pending_trash(state: State, file_id: String) -> State {
+  State(..state, pending_trashes: set.delete(state.pending_trashes, file_id))
 }
 
 pub fn supervised(
@@ -89,7 +126,13 @@ pub fn start(
   name: Name(Command),
   config: ReconcilerConfig,
 ) -> actor.StartResult(Subject(Command)) {
-  actor.new(State(config: config, root_id: None, model: dict.new()))
+  actor.new(State(
+    config: config,
+    root_id: None,
+    model: dict.new(),
+    pending_uploads: set.new(),
+    pending_trashes: set.new(),
+  ))
   |> actor.on_message(handle_command)
   |> actor.named(name)
   |> actor.start
@@ -120,6 +163,39 @@ fn handle_command(
           actor.continue(state)
         }
       }
+    SettleUpload(path, outcome) -> {
+      let state = case outcome {
+        Ok(sighting) ->
+          State(
+            ..state,
+            model: dict.insert(state.model, sighting.file_id, sighting),
+          )
+        Error(_reason) -> state
+      }
+      let state = forget_pending_upload(state, path)
+      run_round_if_seeded(state)
+      actor.continue(state)
+    }
+    SettleTrash(file_id, outcome) -> {
+      let state = case outcome {
+        Ok(Nil) -> State(..state, model: dict.delete(state.model, file_id))
+        Error(_reason) -> state
+      }
+      let state = forget_pending_trash(state, file_id)
+      run_round_if_seeded(state)
+      actor.continue(state)
+    }
+    ReconcileNow -> {
+      run_round_if_seeded(state)
+      actor.continue(state)
+    }
+  }
+}
+
+fn run_round_if_seeded(state: State) -> Nil {
+  case state.root_id {
+    Some(_root) -> run_round(state)
+    None -> Nil
   }
 }
 

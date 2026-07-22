@@ -39,7 +39,7 @@ pub fn start_daemon(
   store store: state_owner.StateStore,
   drive drive: remote_poller.DrivePort,
   mirror_root mirror_root: String,
-  fetch_to_disk fetch_to_disk: fn(String, String) -> Result(Nil, String),
+  transfers transfers: transfer_pool.DriveTransferOps,
   native_policy native_policy: entry.NativeDocPolicy,
 ) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
@@ -58,10 +58,29 @@ pub fn start_daemon(
         backoff.compute_delay_ms(attempt, int.random(1000))
       },
     )
+  let reconciler_subject = process.named_subject(reconciler_name)
   let transfer_config =
     transfer_pool.TransferConfig(
       root_dir: mirror_root,
-      fetch_to_disk: fetch_to_disk,
+      fetch_to_disk: transfers.fetch_to_disk,
+      upload_to_drive: transfers.upload_to_drive,
+      create_remote_folder: transfers.create_remote_folder,
+      trash_remote: transfers.trash_remote,
+      settle_upload: fn(path, outcome) {
+        process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
+      },
+      settle_trash: fn(file_id, outcome) {
+        process.send(
+          reconciler_subject,
+          reconciler.SettleTrash(file_id, outcome),
+        )
+      },
+      observe_folder: fn(sighting) {
+        process.send(
+          reconciler_subject,
+          reconciler.ApplyRemoteChanges([reconciler.ObservedFile(sighting)]),
+        )
+      },
       state_owner: process.named_subject(state_owner_name),
       native_policy: native_policy,
       pick_retry_delay_ms: fn(attempt) {
