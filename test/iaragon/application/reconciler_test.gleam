@@ -18,6 +18,7 @@ type Dispatch {
   DeleteLocalDispatched(file_id: String, path: String)
   UploadDispatched(plan: reconciler.UploadPlan)
   TrashDispatched(file_id: String)
+  ConflictCopyDispatched(remote: entry.RemoteFile, copy_path: String)
   LocalScanned
 }
 
@@ -78,6 +79,9 @@ fn start_reconciler_with_interval(
         dispatch_trash_remote: fn(file_id) {
           process.send(dispatches, TrashDispatched(file_id))
         },
+        dispatch_conflict_copy: fn(remote, copy_path) {
+          process.send(dispatches, ConflictCopyDispatched(remote, copy_path))
+        },
         scan_local: fn() {
           process.send(dispatches, LocalScanned)
           Ok(locals)
@@ -85,6 +89,7 @@ fn start_reconciler_with_interval(
         hash_local_file: fn(_path) { hash_outcome },
         native_policy: LinkFile,
         round_interval_ms: round_interval_ms,
+        today: fn() { "2026-07-22" },
       ),
     )
   process.named_subject(name)
@@ -462,6 +467,110 @@ pub fn a_locally_deleted_file_is_planned_for_trash_once_test() {
   process.send(owner, state_owner.ForgetKnown("id-1"))
   process.send(sut, reconciler.SettleTrash("id-1", Ok(Nil)))
   assert expect_no_transfers(dispatches)
+}
+
+// --- Conflict resolution --------------------------------------------------------
+
+fn a_synced_known(file_id: String, path: String) -> entry.KnownFile {
+  KnownFile(
+    file_id: file_id,
+    path: path,
+    remote_modified_time: "2026-07-01T10:00:00Z",
+    md5: Some("aaa"),
+    size: 42,
+    local_mtime_seconds: 1000,
+    kind: Blob,
+  )
+}
+
+pub fn an_edit_edit_conflict_dispatches_a_conflicted_copy_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  let edited_local =
+    LocalFile(path: "report.txt", size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [edited_local], Error("unused"))
+  let edited_remote =
+    RemoteSighting(
+      ..a_sighting("id-1", "report.txt", "root"),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [edited_remote]))
+
+  let assert [ConflictCopyDispatched(remote, copy_path)] =
+    receive_transfers(dispatches, 1)
+  assert remote.file_id == "id-1"
+  assert remote.path == "report.txt"
+  assert copy_path == "report (conflicted copy 2026-07-22).txt"
+
+  // In flight: rounds must not re-dispatch the same conflict.
+  process.send(sut, reconciler.ReconcileNow)
+  assert expect_no_transfers(dispatches)
+}
+
+pub fn divergent_never_synced_twins_conflict_into_a_copy_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "report.txt", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  // The on-demand hash disagrees with the remote md5: real divergence.
+  let sut = start_reconciler(owner, dispatches, [local], Ok("zzz"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
+  )
+
+  let assert [ConflictCopyDispatched(_, copy_path)] =
+    receive_transfers(dispatches, 1)
+  assert copy_path == "report (conflicted copy 2026-07-22).txt"
+}
+
+pub fn a_local_edit_survives_a_remote_delete_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  let edited_local =
+    LocalFile(path: "report.txt", size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [edited_local], Error("unused"))
+
+  // Remote side deleted the file; the local edit must win.
+  process.send(sut, reconciler.SeedMirror("root", []))
+
+  // Resolution forgets the stale link…
+  assert fakes.retry_until(40, fn() {
+    process.call(owner, 500, state_owner.GetKnown("id-1", _)) == None
+  })
+  // …so the next round sees a brand-new local file and uploads it.
+  process.send(sut, reconciler.ReconcileNow)
+  let assert [UploadDispatched(plan)] = receive_transfers(dispatches, 1)
+  assert plan.local.path == "report.txt"
+  assert plan.existing_file_id == None
+}
+
+pub fn a_remote_edit_survives_a_local_delete_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  let dispatches = process.new_subject()
+  // No local files: the mirror copy was deleted while the remote changed.
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+  let edited_remote =
+    RemoteSighting(
+      ..a_sighting("id-1", "report.txt", "root"),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [edited_remote]))
+
+  assert fakes.retry_until(40, fn() {
+    process.call(owner, 500, state_owner.GetKnown("id-1", _)) == None
+  })
+  process.send(sut, reconciler.ReconcileNow)
+  let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
+  assert remote.file_id == "id-1"
 }
 
 // --- Periodic rounds ----------------------------------------------------------

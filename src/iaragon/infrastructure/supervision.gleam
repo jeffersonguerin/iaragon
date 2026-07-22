@@ -7,6 +7,9 @@ import gleam/int
 import gleam/otp/actor
 import gleam/otp/static_supervisor
 import gleam/result
+import gleam/string
+import gleam/time/calendar
+import gleam/time/timestamp
 import iaragon/application/reconciler
 import iaragon/application/state_owner
 import iaragon/domain/entry
@@ -31,6 +34,21 @@ pub type Daemon {
 const poll_interval_ms = 30_000
 
 const round_interval_ms = 30_000
+
+/// YYYY-MM-DD in UTC, for conflicted-copy names.
+fn build_date_stamp() -> String {
+  let #(date, _time) =
+    timestamp.to_calendar(timestamp.system_time(), calendar.utc_offset)
+  int.to_string(date.year)
+  <> "-"
+  <> pad_two(calendar.month_to_int(date.month))
+  <> "-"
+  <> pad_two(date.day)
+}
+
+fn pad_two(value: Int) -> String {
+  string.pad_start(int.to_string(value), 2, "0")
+}
 
 /// Start the whole tree. The composition root injects the persistence store,
 /// the (authenticated) Drive port, the mirror location and the streaming
@@ -120,10 +138,17 @@ pub fn start_daemon(
           transfer_pool.EnqueueTrashRemote(file_id),
         )
       },
+      dispatch_conflict_copy: fn(remote, copy_path) {
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueConflictCopy(remote, copy_path),
+        )
+      },
       scan_local: fn() { local_scan.scan_mirror(mirror_root) },
       hash_local_file: fn(path) { hashing.hash_mirror_file(mirror_root, path) },
       native_policy: native_policy,
       round_interval_ms: round_interval_ms,
+      today: build_date_stamp,
     )
 
   static_supervisor.new(static_supervisor.OneForOne)

@@ -22,6 +22,7 @@ import gleam/otp/supervision.{type ChildSpecification}
 import gleam/set.{type Set}
 import gleam/string
 import iaragon/application/state_owner
+import iaragon/domain/conflicts
 import iaragon/domain/decision
 import iaragon/domain/entry.{
   type LocalFile, type NativeDocPolicy, type RemoteFile, Blob, Folder,
@@ -93,13 +94,17 @@ pub type ReconcilerConfig {
     dispatch_delete_local: fn(String, String) -> Nil,
     dispatch_upload: fn(UploadPlan) -> Nil,
     dispatch_trash_remote: fn(String) -> Nil,
+    /// Edit-edit resolution: (remote version, conflicted-copy path).
+    dispatch_conflict_copy: fn(RemoteFile, String) -> Nil,
     scan_local: fn() -> Result(List(LocalFile), String),
     /// Hash a mirror-relative path on demand (md5, lowercase hex).
     hash_local_file: fn(String) -> Result(String, String),
     native_policy: NativeDocPolicy,
-    /// Local edits have no push trigger yet (no watcher): rounds re-run on
-    /// this interval once the mirror is seeded.
+    /// Rounds re-run on this interval once the mirror is seeded — the local
+    /// backstop behind the watcher.
     round_interval_ms: Int,
+    /// Date stamp (YYYY-MM-DD) for conflicted-copy names; injected for tests.
+    today: fn() -> String,
   )
 }
 
@@ -314,11 +319,48 @@ fn run_round(state: State) -> State {
             )
           }
         }
-      // Conflicts wait for the bidirectional phase's resolution policy.
-      decision.Conflict(_, _, _) -> state
+      decision.Conflict(path, file_id, kind) ->
+        resolve_conflict(state, path, file_id, kind, remote_by_id)
       decision.Noop -> state
     }
   })
+}
+
+/// The chosen policies: edit-edit (and divergent both-created) becomes a
+/// dated conflicted copy — local moves aside and syncs up as a new file,
+/// remote takes the original path. Edit-versus-delete: the EDIT wins — the
+/// stale sync link is forgotten, so the surviving side re-creates the file
+/// as brand new on the next round.
+fn resolve_conflict(
+  state: State,
+  path: String,
+  file_id: String,
+  kind: decision.ConflictKind,
+  remote_by_id: Dict(String, RemoteFile),
+) -> State {
+  case kind {
+    decision.EditEdit | decision.BothCreated ->
+      case
+        set.contains(state.pending_conflicts, path),
+        dict.get(remote_by_id, file_id)
+      {
+        False, Ok(remote) -> {
+          state.config.dispatch_conflict_copy(
+            remote,
+            conflicts.build_conflicted_copy_path(path, state.config.today()),
+          )
+          State(
+            ..state,
+            pending_conflicts: set.insert(state.pending_conflicts, path),
+          )
+        }
+        _, _ -> state
+      }
+    decision.LocalEditRemoteDelete | decision.RemoteEditLocalDelete -> {
+      process.send(state.config.state_owner, state_owner.ForgetKnown(file_id))
+      state
+    }
+  }
 }
 
 fn dispatch_upload_once(
