@@ -61,7 +61,10 @@ pub fn build_watch_options(
   |> polly.add_callback(fn(_event) { process.send(notify, NoticeLocalActivity) })
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     NoticeLocalActivity ->
       case state.flush_scheduled {

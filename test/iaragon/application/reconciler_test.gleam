@@ -485,9 +485,17 @@ fn a_synced_known(file_id: String, path: String) -> entry.KnownFile {
 
 pub fn an_edit_edit_conflict_dispatches_a_conflicted_copy_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   let edited_local =
-    LocalFile(path: "report.txt", size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+    LocalFile(
+      path: "report.txt",
+      size: 43,
+      mtime_seconds: 2000,
+      md5: Some("bbb"),
+    )
   let dispatches = process.new_subject()
   let sut = start_reconciler(owner, dispatches, [edited_local], Error("unused"))
   let edited_remote =
@@ -530,9 +538,17 @@ pub fn divergent_never_synced_twins_conflict_into_a_copy_test() {
 
 pub fn a_local_edit_survives_a_remote_delete_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   let edited_local =
-    LocalFile(path: "report.txt", size: 43, mtime_seconds: 2000, md5: Some("bbb"))
+    LocalFile(
+      path: "report.txt",
+      size: 43,
+      mtime_seconds: 2000,
+      md5: Some("bbb"),
+    )
   let dispatches = process.new_subject()
   let sut = start_reconciler(owner, dispatches, [edited_local], Error("unused"))
 
@@ -552,7 +568,10 @@ pub fn a_local_edit_survives_a_remote_delete_test() {
 
 pub fn a_remote_edit_survives_a_local_delete_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   let dispatches = process.new_subject()
   // No local files: the mirror copy was deleted while the remote changed.
   let sut = start_reconciler(owner, dispatches, [], Error("unused"))

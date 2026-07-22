@@ -170,7 +170,9 @@ fn run_conflict_copy(
         state,
         failed_attempts,
         fn(attempts) { RetryConflictCopy(remote, copy_path, attempts) },
-        give_up: fn() { state.config.settle_conflict(remote.path, Error(reason)) },
+        give_up: fn() {
+          state.config.settle_conflict(remote.path, Error(reason))
+        },
       )
       actor.continue(state)
     }

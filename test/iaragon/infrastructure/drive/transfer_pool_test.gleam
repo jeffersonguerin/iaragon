@@ -410,7 +410,10 @@ pub fn a_conflict_moves_local_aside_and_downloads_the_remote_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+    transfer_pool.EnqueueConflictCopy(
+      a_remote("id-1", "report.txt"),
+      a_copy_path,
+    ),
   )
 
   let assert Ok(ConflictSettled("report.txt", Ok(Nil))) =
@@ -445,16 +448,17 @@ pub fn a_taken_copy_name_gets_a_numeric_variant_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+    transfer_pool.EnqueueConflictCopy(
+      a_remote("id-1", "report.txt"),
+      a_copy_path,
+    ),
   )
 
   let assert Ok(ConflictSettled("report.txt", Ok(Nil))) =
     process.receive(events, 2000)
   // The earlier conflict file is untouched; the new copy takes a variant.
   assert simplifile.read(root <> "/" <> a_copy_path) == Ok("older conflict")
-  assert simplifile.read(
-      root <> "/report (conflicted copy 2026-07-22) (2).txt",
-    )
+  assert simplifile.read(root <> "/report (conflicted copy 2026-07-22) (2).txt")
     == Ok("local edit")
 }
 
@@ -476,7 +480,10 @@ pub fn a_failing_conflict_download_settles_the_failure_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+    transfer_pool.EnqueueConflictCopy(
+      a_remote("id-1", "report.txt"),
+      a_copy_path,
+    ),
   )
 
   let assert Ok(ConflictSettled("report.txt", Error(_))) =

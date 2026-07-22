@@ -140,8 +140,22 @@ de arquivos.
 3. Bidirecional com detecção de conflito
 4. Overlays no gerenciador de arquivos
 
-**Download-only E upload FUNCIONAIS de ponta a ponta (sync bidirecional
-sem resolução de conflito — conflitos ainda são detectados e ignorados).**
+**SYNC BIDIRECIONAL COMPLETO, com resolução de conflito e watcher local.**
+
+Fase conflitos + watcher (sessão 6): política decidida pelo usuário —
+**edit-edit e both-created divergente viram cópia conflitada** estilo Dropbox
+(`domain/conflicts.build_conflicted_copy_path`: "nome (conflicted copy
+YYYY-MM-DD).ext"; local move-se p/ a cópia — sobe como arquivo novo — e o
+remoto assume o path original; variantes numéricas se o nome colidir;
+`EnqueueConflictCopy` no pool com `SettleConflict` de volta);
+**edit-vs-delete: a edição vence** — resolução = `ForgetKnown` (o lado
+sobrevivente vira criação nova na rodada seguinte). `pending_conflicts`
+no reconciler evita re-despacho; `today()` injetado p/ o carimbo de data.
+**Watcher local real**: polly (polling, sem dependência de inotify-tools)
+supervisionado na árvore → `local_watcher` com debounce (1,5 s; poll 2 s)
+→ `ReconcileNow` — edição local sincroniza em segundos; a rodada periódica
+de 30 s vira backstop. filespy/inotify pode substituir atrás do mesmo
+comando `NoticeLocalActivity`.
 
 Fase upload (sessão 5): leitura em chunks (`fs/chunked_read` + FFI `file`);
 upload resumable (`drive/upload`: POST/PATCH inicia sessão via Location,
@@ -196,12 +210,11 @@ uma decisão de bookkeeping no domínio); shortcuts ficam fora do espelho
 (precisam de `shortcutDetails` na projeção); export de nativos
 (ExportOffice/ExportOdf) ainda materializa como link.
 
-**Próximas sessões**: resolução de conflito (hoje `Conflict` é detectado e
-ignorado — decidir política: cópia "conflicted" estilo Dropbox?), watcher
-inotify real (filespy/polly) substituindo/complementando as rodadas
-periódicas, renames como renames (hoje viram delete+create), export real de
-nativos (ExportOffice/ExportOdf), shortcutDetails, overlays de file manager,
-e as limitações acima.
+**Próximas sessões**: renames como renames (hoje viram delete+create —
+funcional, mas re-transfere), export real de nativos
+(ExportOffice/ExportOdf), shortcutDetails, watcher inotify (filespy) como
+alternativa ao polling do polly, overlays de file manager, e as limitações
+acima (modelo remoto só em memória; adoção de gêmeos sem bookkeeping).
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
