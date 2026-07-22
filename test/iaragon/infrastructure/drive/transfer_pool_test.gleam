@@ -379,6 +379,85 @@ pub fn a_failed_upload_retries_then_settles_the_failure_test() {
   assert known_of(owner, "id-up") == None
 }
 
+// --- Local moves (remote renames) -----------------------------------------------
+
+fn a_known_at(file_id: String, path: String) -> entry.KnownFile {
+  entry.KnownFile(
+    file_id: file_id,
+    path: path,
+    remote_modified_time: "2026-07-01T10:00:00Z",
+    md5: Some("aaa"),
+    size: 5,
+    local_mtime_seconds: 1000,
+    kind: Blob,
+  )
+}
+
+pub fn a_move_relocates_the_file_and_updates_known_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/move"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) = simplifile.write(to: root <> "/old.txt", contents: "bytes")
+  let pool =
+    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueMoveLocal(
+      a_known_at("id-1", "docs/renamed.txt"),
+      from: "old.txt",
+    ),
+  )
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
+  assert simplifile.read(root <> "/docs/renamed.txt") == Ok("bytes")
+  assert simplifile.is_file(root <> "/old.txt") == Ok(False)
+  let assert Some(known) = known_of(owner, "id-1")
+  assert known.path == "docs/renamed.txt"
+}
+
+pub fn an_already_done_move_still_records_known_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/move-done"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  // The parent folder was renamed as a whole earlier: the file is already at
+  // its destination and the source is gone.
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/renamed.txt", contents: "bytes")
+  let pool =
+    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueMoveLocal(
+      a_known_at("id-1", "renamed.txt"),
+      from: "old.txt",
+    ),
+  )
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
+  assert simplifile.read(root <> "/renamed.txt") == Ok("bytes")
+}
+
+pub fn a_folder_move_renames_the_directory_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/move-folder"
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/old-dir/child.txt", contents: "child")
+  let pool =
+    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+  let folder =
+    entry.KnownFile(..a_known_at("id-f", "new-dir"), md5: None, kind: Folder)
+
+  process.send(pool, transfer_pool.EnqueueMoveLocal(folder, from: "old-dir"))
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-f") != None })
+  // A plain rename carries the children along in one go.
+  assert simplifile.read(root <> "/new-dir/child.txt") == Ok("child")
+  assert simplifile.is_directory(root <> "/old-dir") == Ok(False)
+}
+
 // --- Conflicted copies ----------------------------------------------------------
 
 type ConflictEvent {

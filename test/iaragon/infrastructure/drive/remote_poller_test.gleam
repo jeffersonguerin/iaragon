@@ -169,6 +169,21 @@ pub fn a_failed_seed_is_retried_until_it_succeeds_test() {
     process.receive(deliver, 2000)
 }
 
+pub fn a_reseed_request_makes_the_next_cycle_seed_again_test() {
+  let owner = start_state_owner()
+  let deliver = process.new_subject()
+  let poller = start_poller(owner, deliver, a_port(), idle_interval)
+  process.send(poller, remote_poller.Poll)
+  let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)
+
+  // The reconciler lost its model (restart) and asks for a fresh seed.
+  process.send(poller, remote_poller.Reseed)
+
+  let assert Ok(reconciler.SeedMirror("root-1", _)) =
+    process.receive(deliver, 2000)
+  Nil
+}
+
 pub fn polling_repeats_on_the_configured_interval_test() {
   let owner = start_state_owner()
   process.send(owner, state_owner.SetPageToken("tok-1"))

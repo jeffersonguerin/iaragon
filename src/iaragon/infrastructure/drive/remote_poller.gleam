@@ -25,6 +25,9 @@ import iaragon/infrastructure/drive/changes.{type Change, type ChangedFile}
 
 pub type Command {
   Poll
+  /// The reconciler lost its in-memory model (it was restarted): seed again
+  /// on the next cycle, which starts immediately.
+  Reseed
 }
 
 /// What the poller needs from the Drive client, already composed with
@@ -56,6 +59,10 @@ type State {
     self: Subject(Command),
     failed_attempts: Int,
     seeded: Bool,
+    /// The one outstanding scheduled Poll. Cancelled and re-armed on every
+    /// handled Poll so an out-of-band Poll (first kick, reseed) can never
+    /// leave two polling chains running.
+    scheduled_poll: option.Option(process.Timer),
   )
 }
 
@@ -75,6 +82,7 @@ pub fn start(
     self: process.named_subject(name),
     failed_attempts: 0,
     seeded: False,
+    scheduled_poll: None,
   ))
   |> actor.on_message(handle_command)
   |> actor.named(name)
@@ -86,21 +94,47 @@ fn handle_command(
   command: Command,
 ) -> actor.Next(State, Command) {
   case command {
+    Reseed -> {
+      process.send(state.self, Poll)
+      actor.continue(State(..state, seeded: False))
+    }
     Poll -> {
+      // Only one scheduled Poll may be outstanding: an out-of-band Poll
+      // (reseed, first kick) supersedes the pending one instead of forking
+      // a second polling chain.
+      case state.scheduled_poll {
+        Some(timer) -> {
+          let _ = process.cancel_timer(timer)
+          Nil
+        }
+        None -> Nil
+      }
       let outcome = case state.seeded {
         False -> seed_mirror(state.config)
         True -> advance_changes(state.config)
       }
       case outcome {
         Ok(Nil) -> {
-          process.send_after(state.self, state.config.poll_interval_ms, Poll)
-          actor.continue(State(..state, failed_attempts: 0, seeded: True))
+          let timer =
+            process.send_after(state.self, state.config.poll_interval_ms, Poll)
+          actor.continue(
+            State(
+              ..state,
+              failed_attempts: 0,
+              seeded: True,
+              scheduled_poll: Some(timer),
+            ),
+          )
         }
         Error(_reason) -> {
           let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
-          process.send_after(state.self, delay, Poll)
+          let timer = process.send_after(state.self, delay, Poll)
           actor.continue(
-            State(..state, failed_attempts: state.failed_attempts + 1),
+            State(
+              ..state,
+              failed_attempts: state.failed_attempts + 1,
+              scheduled_poll: Some(timer),
+            ),
           )
         }
       }

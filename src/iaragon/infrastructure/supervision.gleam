@@ -149,6 +149,18 @@ pub fn start_daemon(
           transfer_pool.EnqueueConflictCopy(remote, copy_path),
         )
       },
+      dispatch_move_local: fn(updated, from) {
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueMoveLocal(updated, from),
+        )
+      },
+      request_seed: fn() {
+        process.send(
+          process.named_subject(remote_poller_name),
+          remote_poller.Reseed,
+        )
+      },
       scan_local: fn() { local_scan.scan_mirror(mirror_root) },
       hash_local_file: fn(path) { hashing.hash_mirror_file(mirror_root, path) },
       native_policy: native_policy,

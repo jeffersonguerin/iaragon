@@ -44,6 +44,11 @@ pub type Command {
   /// `copy_path` (it syncs up as a new file on the next round) and download
   /// the remote version onto the original path.
   EnqueueConflictCopy(remote: RemoteFile, copy_path: String)
+  /// Apply a remote rename/move: relocate the mirror copy from `from` to
+  /// `updated.path` and record the updated known state. Idempotent — a file
+  /// already carried to its destination (e.g. by a parent folder rename)
+  /// only gets its bookkeeping.
+  EnqueueMoveLocal(updated: entry.KnownFile, from: String)
   /// Internal: scheduled retries of failed transfers.
   RetryDownload(remote: RemoteFile, failed_attempts: Int)
   RetryUpload(plan: UploadPlan, failed_attempts: Int)
@@ -139,11 +144,59 @@ fn handle_command(
     EnqueueTrashRemote(file_id) -> run_trash(state, file_id, 0)
     RetryTrash(file_id, failed_attempts) ->
       run_trash(state, file_id, failed_attempts)
+    EnqueueMoveLocal(updated, from) -> {
+      run_move_local(state.config, updated, from)
+      actor.continue(state)
+    }
     EnqueueConflictCopy(remote, copy_path) ->
       run_conflict_copy(state, remote, copy_path, 0)
     RetryConflictCopy(remote, copy_path, failed_attempts) ->
       run_conflict_copy(state, remote, copy_path, failed_attempts)
   }
+}
+
+// --- Local moves (remote renames) ------------------------------------------------
+
+/// Known state is only updated when the destination really holds the file:
+/// a failed rename leaves the old bookkeeping in place, and the next round
+/// re-decides the move.
+fn run_move_local(
+  config: TransferConfig,
+  updated: entry.KnownFile,
+  from: String,
+) -> Nil {
+  let source = config.root_dir <> "/" <> from
+  let destination = config.root_dir <> "/" <> updated.path
+  let moved = {
+    use Nil <- result.try(
+      simplifile.create_directory_all(filepath.directory_name(destination))
+      |> describe_error,
+    )
+    case source_exists(source), destination_exists(destination) {
+      True, False -> simplifile.rename(at: source, to: destination) |> describe_error
+      // Already carried to its destination (e.g. by a parent folder rename).
+      False, True -> Ok(Nil)
+      False, False -> Error("neither source nor destination exists")
+      // Both exist: something else occupies the destination — leave the
+      // filesystem alone and let the next round reconcile the difference.
+      True, True -> Error("destination already occupied")
+    }
+  }
+  case moved {
+    Ok(Nil) ->
+      process.send(config.state_owner, state_owner.PutKnown(updated))
+    Error(_reason) -> Nil
+  }
+}
+
+fn source_exists(path: String) -> Bool {
+  simplifile.is_file(path) == Ok(True)
+  || simplifile.is_directory(path) == Ok(True)
+}
+
+fn destination_exists(path: String) -> Bool {
+  simplifile.is_file(path) == Ok(True)
+  || simplifile.is_directory(path) == Ok(True)
 }
 
 // --- Conflicted copies ----------------------------------------------------------

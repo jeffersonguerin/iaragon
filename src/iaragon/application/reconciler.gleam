@@ -96,6 +96,11 @@ pub type ReconcilerConfig {
     dispatch_trash_remote: fn(String) -> Nil,
     /// Edit-edit resolution: (remote version, conflicted-copy path).
     dispatch_conflict_copy: fn(RemoteFile, String) -> Nil,
+    /// Remote rename: (known snapshot with the NEW path, old path).
+    dispatch_move_local: fn(entry.KnownFile, String) -> Nil,
+    /// Ask the poller for a fresh seed — used when observations arrive but
+    /// the in-memory model is gone (this actor was restarted).
+    request_seed: fn() -> Nil,
     scan_local: fn() -> Result(List(LocalFile), String),
     /// Hash a mirror-relative path on demand (md5, lowercase hex).
     hash_local_file: fn(String) -> Result(String, String),
@@ -185,7 +190,10 @@ fn handle_command(
     }
     ApplyRemoteChanges(observations) ->
       case state.root_id {
-        None -> actor.continue(state)
+        None -> {
+          state.config.request_seed()
+          actor.continue(state)
+        }
         Some(_root) -> {
           let model = list.fold(observations, state.model, apply_observation)
           actor.continue(run_round(State(..state, model: model)))
@@ -266,6 +274,10 @@ fn run_round(state: State) -> State {
     known
     |> list.map(fn(file) { #(file.path, file) })
     |> dict.from_list
+  let known_by_id =
+    known
+    |> list.map(fn(file) { #(file.file_id, file) })
+    |> dict.from_list
   let folder_ids_by_path =
     remotes
     |> list.filter(fn(remote) { remote.kind == Folder })
@@ -321,8 +333,14 @@ fn run_round(state: State) -> State {
         }
       decision.Conflict(path, file_id, kind) ->
         resolve_conflict(state, path, file_id, kind, remote_by_id)
-      // Dispatch wired in the move round (transfer pool support first).
-      decision.MoveLocal(_file_id, _from, _to) -> state
+      decision.MoveLocal(file_id, from, to) -> {
+        case dict.get(known_by_id, file_id) {
+          Ok(known) ->
+            config.dispatch_move_local(entry.KnownFile(..known, path: to), from)
+          Error(Nil) -> Nil
+        }
+        state
+      }
       decision.AdoptKnown(file_id, path) -> {
         adopt_twin(config, file_id, path, remote_by_id, locals_by_path)
         state

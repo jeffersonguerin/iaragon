@@ -19,6 +19,8 @@ type Dispatch {
   UploadDispatched(plan: reconciler.UploadPlan)
   TrashDispatched(file_id: String)
   ConflictCopyDispatched(remote: entry.RemoteFile, copy_path: String)
+  MoveLocalDispatched(updated: entry.KnownFile, from: String)
+  SeedRequested
   LocalScanned
 }
 
@@ -82,6 +84,10 @@ fn start_reconciler_with_interval(
         dispatch_conflict_copy: fn(remote, copy_path) {
           process.send(dispatches, ConflictCopyDispatched(remote, copy_path))
         },
+        dispatch_move_local: fn(updated, from) {
+          process.send(dispatches, MoveLocalDispatched(updated, from))
+        },
+        request_seed: fn() { process.send(dispatches, SeedRequested) },
         scan_local: fn() {
           process.send(dispatches, LocalScanned)
           Ok(locals)
@@ -287,14 +293,39 @@ pub fn native_docs_are_planned_as_link_files_test() {
   assert remote.kind == GoogleNative
 }
 
-pub fn changes_arriving_before_the_seed_are_ignored_test() {
+pub fn changes_arriving_before_the_seed_request_a_reseed_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let dispatches = process.new_subject()
   let sut = start_reconciler(owner, dispatches, [], Error("unused"))
 
+  // No model (e.g. this actor was just restarted by the supervisor): the
+  // observations cannot be applied, so ask the poller for a fresh seed.
   process.send(sut, reconciler.ApplyRemoteChanges([ObservedRemoval("id-1")]))
 
+  assert process.receive(dispatches, 1000) == Ok(SeedRequested)
   assert expect_no_transfers(dispatches)
+}
+
+pub fn a_remote_rename_dispatches_a_local_move_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  let local =
+    LocalFile(path: "report.txt", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "renamed.txt", "root")]),
+  )
+
+  let assert [MoveLocalDispatched(updated, "report.txt")] =
+    receive_transfers(dispatches, 1)
+  assert updated.file_id == "id-1"
+  assert updated.path == "renamed.txt"
+  // Everything but the path is carried over from the known snapshot.
+  assert updated.md5 == Some("aaa")
+  Nil
 }
 
 // --- Upload planning ----------------------------------------------------------
