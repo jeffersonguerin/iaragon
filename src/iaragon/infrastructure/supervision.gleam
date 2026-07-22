@@ -77,6 +77,12 @@ pub fn start_daemon(
           reconciler.SettleTrash(file_id, outcome),
         )
       },
+      settle_conflict: fn(path, outcome) {
+        process.send(
+          reconciler_subject,
+          reconciler.SettleConflict(path, outcome),
+        )
+      },
       observe_folder: fn(sighting) {
         process.send(
           reconciler_subject,

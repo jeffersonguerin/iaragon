@@ -17,6 +17,7 @@
 import filepath
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/otp/actor
@@ -28,6 +29,7 @@ import iaragon/domain/entry.{
   type NativeDocPolicy, type RemoteFile, Blob, Folder, GoogleNative, KnownFile,
   Shortcut,
 }
+import iaragon/domain/paths
 import iaragon/infrastructure/drive/changes.{type ChangedFile}
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/upload.{type UploadTarget}
@@ -38,10 +40,15 @@ pub type Command {
   EnqueueDeleteLocal(file_id: String, path: String)
   EnqueueUpload(plan: UploadPlan)
   EnqueueTrashRemote(file_id: String)
+  /// Resolve an edit-edit conflict: move the local version aside to
+  /// `copy_path` (it syncs up as a new file on the next round) and download
+  /// the remote version onto the original path.
+  EnqueueConflictCopy(remote: RemoteFile, copy_path: String)
   /// Internal: scheduled retries of failed transfers.
   RetryDownload(remote: RemoteFile, failed_attempts: Int)
   RetryUpload(plan: UploadPlan, failed_attempts: Int)
   RetryTrash(file_id: String, failed_attempts: Int)
+  RetryConflictCopy(remote: RemoteFile, copy_path: String, failed_attempts: Int)
 }
 
 /// The authenticated Drive operations, grouped so the composition root can
@@ -70,6 +77,7 @@ pub type TransferConfig {
     /// Outcome feedback into the reconciler (path / file_id keyed).
     settle_upload: fn(String, Result(RemoteSighting, String)) -> Nil,
     settle_trash: fn(String, Result(Nil, String)) -> Nil,
+    settle_conflict: fn(String, Result(Nil, String)) -> Nil,
     /// Folders created on the way to an upload enter the remote model here.
     observe_folder: fn(RemoteSighting) -> Nil,
     state_owner: Subject(state_owner.Command),
@@ -131,6 +139,85 @@ fn handle_command(
     EnqueueTrashRemote(file_id) -> run_trash(state, file_id, 0)
     RetryTrash(file_id, failed_attempts) ->
       run_trash(state, file_id, failed_attempts)
+    EnqueueConflictCopy(remote, copy_path) ->
+      run_conflict_copy(state, remote, copy_path, 0)
+    RetryConflictCopy(remote, copy_path, failed_attempts) ->
+      run_conflict_copy(state, remote, copy_path, failed_attempts)
+  }
+}
+
+// --- Conflicted copies ----------------------------------------------------------
+
+fn run_conflict_copy(
+  state: State,
+  remote: RemoteFile,
+  copy_path: String,
+  failed_attempts: Int,
+) -> actor.Next(State, Command) {
+  let outcome = {
+    use Nil <- result.try(move_local_aside(state.config, remote.path, copy_path))
+    use Nil <- result.try(materialize(state.config, remote))
+    Ok(Nil)
+  }
+  case outcome {
+    Ok(Nil) -> {
+      record_downloaded(state.config, remote)
+      state.config.settle_conflict(remote.path, Ok(Nil))
+      actor.continue(state)
+    }
+    Error(reason) -> {
+      retry_or(
+        state,
+        failed_attempts,
+        fn(attempts) { RetryConflictCopy(remote, copy_path, attempts) },
+        give_up: fn() { state.config.settle_conflict(remote.path, Error(reason)) },
+      )
+      actor.continue(state)
+    }
+  }
+}
+
+/// Rename the local original to the conflicted-copy path, never overwriting:
+/// an already-taken name gets a numeric variant. A retry after a successful
+/// move (original absent) is a no-op.
+fn move_local_aside(
+  config: TransferConfig,
+  original_path: String,
+  copy_path: String,
+) -> Result(Nil, String) {
+  let source = config.root_dir <> "/" <> original_path
+  case simplifile.is_file(source) {
+    Ok(True) ->
+      simplifile.rename(
+        at: source,
+        to: config.root_dir <> "/" <> pick_free_variant(config, copy_path, 2),
+      )
+      |> describe_error
+    _ -> Ok(Nil)
+  }
+}
+
+fn pick_free_variant(
+  config: TransferConfig,
+  copy_path: String,
+  next_suffix: Int,
+) -> String {
+  case simplifile.is_file(config.root_dir <> "/" <> copy_path) {
+    Ok(True) -> {
+      let #(stem, extension) = paths.split_extension(copy_path)
+      let variant = case extension {
+        "" -> stem <> " (" <> int.to_string(next_suffix) <> ")"
+        extension ->
+          stem <> " (" <> int.to_string(next_suffix) <> ")." <> extension
+      }
+      // The variant candidates share the dated stem, so recursion always
+      // terminates at the first free number.
+      case simplifile.is_file(config.root_dir <> "/" <> variant) {
+        Ok(True) -> pick_free_variant(config, copy_path, next_suffix + 1)
+        _ -> variant
+      }
+    }
+    _ -> copy_path
   }
 }
 

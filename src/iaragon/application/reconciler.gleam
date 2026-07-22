@@ -78,6 +78,9 @@ pub type Command {
   SettleUpload(path: String, outcome: Result(RemoteSighting, String))
   /// Outcome of a dispatched remote trash.
   SettleTrash(file_id: String, outcome: Result(Nil, String))
+  /// Outcome of a dispatched conflicted-copy resolution (path keyed). The
+  /// moved-aside copy surfaces in the next scan and uploads as a new file.
+  SettleConflict(path: String, outcome: Result(Nil, String))
   /// Run a round without new remote input — local edits have no other
   /// trigger until a filesystem watcher lands.
   ReconcileNow
@@ -106,10 +109,11 @@ type State {
     self: Subject(Command),
     root_id: Option(String),
     model: Dict(String, RemoteSighting),
-    /// Paths with an upload in flight and file ids with a trash in flight:
-    /// never re-dispatched until the transfer side settles them.
+    /// Paths with an upload or conflict resolution in flight and file ids
+    /// with a trash in flight: never re-dispatched until settled.
     pending_uploads: Set(String),
     pending_trashes: Set(String),
+    pending_conflicts: Set(String),
   )
 }
 
@@ -139,6 +143,7 @@ pub fn start(
     model: dict.new(),
     pending_uploads: set.new(),
     pending_trashes: set.new(),
+    pending_conflicts: set.new(),
   ))
   |> actor.on_message(handle_command)
   |> actor.named(name)
@@ -199,6 +204,14 @@ fn handle_command(
         Error(_reason) -> state
       }
       let state = forget_pending_trash(state, file_id)
+      actor.continue(run_round_if_seeded(state))
+    }
+    SettleConflict(path, _outcome) -> {
+      let state =
+        State(
+          ..state,
+          pending_conflicts: set.delete(state.pending_conflicts, path),
+        )
       actor.continue(run_round_if_seeded(state))
     }
     ReconcileNow -> {

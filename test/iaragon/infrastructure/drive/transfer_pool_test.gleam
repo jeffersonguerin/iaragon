@@ -75,6 +75,7 @@ fn a_pool_config(
     trash_remote: fn(_file_id) { panic as "no trash expected in this test" },
     settle_upload: fn(_path, _outcome) { Nil },
     settle_trash: fn(_file_id, _outcome) { Nil },
+    settle_conflict: fn(_path, _outcome) { Nil },
     observe_folder: fn(_sighting) { Nil },
     state_owner: owner,
     native_policy: LinkFile,
@@ -376,6 +377,111 @@ pub fn a_failed_upload_retries_then_settles_the_failure_test() {
   let assert Ok(UploadSettled("mine.txt", Error(_))) =
     process.receive(events, 2000)
   assert known_of(owner, "id-up") == None
+}
+
+// --- Conflicted copies ----------------------------------------------------------
+
+type ConflictEvent {
+  ConflictSettled(path: String, outcome: Result(Nil, String))
+}
+
+const a_copy_path = "report (conflicted copy 2026-07-22).txt"
+
+pub fn a_conflict_moves_local_aside_and_downloads_the_remote_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/conflict"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/report.txt", contents: "local edit")
+  let fetch = fn(_file_id, destination) {
+    let assert Ok(Nil) =
+      simplifile.write(to: destination, contents: "remote content")
+    Ok(Nil)
+  }
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fetch),
+      settle_conflict: fn(path, outcome) {
+        process.send(events, ConflictSettled(path, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+  )
+
+  let assert Ok(ConflictSettled("report.txt", Ok(Nil))) =
+    process.receive(events, 2000)
+  assert simplifile.read(root <> "/" <> a_copy_path) == Ok("local edit")
+  assert simplifile.read(root <> "/report.txt") == Ok("remote content")
+  let assert Some(known) = known_of(owner, "id-1")
+  assert known.path == "report.txt"
+}
+
+pub fn a_taken_copy_name_gets_a_numeric_variant_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/conflict-variant"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/report.txt", contents: "local edit")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/" <> a_copy_path, contents: "older conflict")
+  let fetch = fn(_file_id, destination) {
+    let assert Ok(Nil) = simplifile.write(to: destination, contents: "remote")
+    Ok(Nil)
+  }
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fetch),
+      settle_conflict: fn(path, outcome) {
+        process.send(events, ConflictSettled(path, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+  )
+
+  let assert Ok(ConflictSettled("report.txt", Ok(Nil))) =
+    process.receive(events, 2000)
+  // The earlier conflict file is untouched; the new copy takes a variant.
+  assert simplifile.read(root <> "/" <> a_copy_path) == Ok("older conflict")
+  assert simplifile.read(
+      root <> "/report (conflicted copy 2026-07-22) (2).txt",
+    )
+    == Ok("local edit")
+}
+
+pub fn a_failing_conflict_download_settles_the_failure_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/conflict-fail"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/report.txt", contents: "local edit")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("always down") }),
+      settle_conflict: fn(path, outcome) {
+        process.send(events, ConflictSettled(path, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueConflictCopy(a_remote("id-1", "report.txt"), a_copy_path),
+  )
+
+  let assert Ok(ConflictSettled("report.txt", Error(_))) =
+    process.receive(events, 2000)
+  Nil
 }
 
 // --- Trash ----------------------------------------------------------------------
