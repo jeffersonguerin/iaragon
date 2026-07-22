@@ -1,7 +1,8 @@
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
   BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit,
-  ForgetKnown, LocalEditRemoteDelete, Noop, RemoteEditLocalDelete, UploadLocal,
+  ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop, RemoteEditLocalDelete,
+  UploadLocal,
 }
 import iaragon/domain/entry.{
   Blob, GoogleNative, KnownFile, LocalFile, RemoteFile,
@@ -170,6 +171,30 @@ pub fn trashed_remote_of_unknown_file_noops_test() {
   // to forget.
   let remote = RemoteFile(..a_remote(), trashed: True)
   assert reconcile.reconcile(None, Some(remote), None) == Noop
+}
+
+// --- Remote renames and moves --------------------------------------------------
+
+pub fn a_remote_rename_moves_the_local_copy_test() {
+  // Same content, new resolved path: the mirror must move the file, not
+  // ignore it (and certainly not re-download it).
+  let renamed = RemoteFile(..a_remote(), name: "renamed.txt", path: "docs/renamed.txt")
+  assert reconcile.reconcile(Some(a_local()), Some(renamed), Some(a_known()))
+    == MoveLocal("id-1", "docs/report.txt", "docs/renamed.txt")
+}
+
+pub fn a_remote_move_with_a_content_change_moves_first_test() {
+  // Move now; the content diff is picked up on the next round, once the
+  // known path has caught up.
+  let moved =
+    RemoteFile(
+      ..a_remote(),
+      path: "elsewhere/report.txt",
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
+  assert reconcile.reconcile(Some(a_local()), Some(moved), Some(a_known()))
+    == MoveLocal("id-1", "docs/report.txt", "elsewhere/report.txt")
 }
 
 // --- Both created without a last known state ---------------------------------

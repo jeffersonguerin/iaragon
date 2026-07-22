@@ -11,7 +11,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/set
 import iaragon/domain/decision.{
   type SyncDecision, BothCreated, Conflict, DeleteLocal, DeleteRemote,
-  DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete, Noop,
+  DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop,
   RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
@@ -59,7 +59,21 @@ pub fn reconcile(
         True -> Conflict(k.path, k.file_id, RemoteEditLocalDelete)
       }
     Some(l), Some(r), Some(k) ->
-      case r.kind {
+      case r.path != k.path {
+        // A rename/move on the remote side: relocate the mirror copy first;
+        // content diffs surface on the next round, against the new path.
+        True -> MoveLocal(k.file_id, k.path, r.path)
+        False -> reconcile_in_place(l, r, k)
+      }
+  }
+}
+
+fn reconcile_in_place(
+  l: LocalFile,
+  r: RemoteFile,
+  k: KnownFile,
+) -> SyncDecision {
+  case r.kind {
         // Download-only by policy: a local edit of a native is never
         // uploaded (it would destroy the source document); the mirror
         // self-heals by re-downloading whenever either side moved.
@@ -79,7 +93,6 @@ pub fn reconcile(
                 False -> Conflict(k.path, k.file_id, EditEdit)
               }
           }
-      }
   }
 }
 

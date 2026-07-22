@@ -321,6 +321,8 @@ fn run_round(state: State) -> State {
         }
       decision.Conflict(path, file_id, kind) ->
         resolve_conflict(state, path, file_id, kind, remote_by_id)
+      // Dispatch wired in the move round (transfer pool support first).
+      decision.MoveLocal(_file_id, _from, _to) -> state
       decision.Noop -> state
     }
   })
