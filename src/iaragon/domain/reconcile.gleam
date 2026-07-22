@@ -36,7 +36,16 @@ pub fn reconcile(
     None, None, None -> Noop
     Some(l), None, None -> UploadLocal(l.path)
     None, Some(r), None -> DownloadRemote(r.file_id, r.path)
-    None, None, Some(k) -> ForgetKnown(k.file_id)
+    None, None, Some(k) ->
+      case k.kind {
+        // The local scan never sees directories, so a folder in this branch
+        // only proves the REMOTE side went away: clean up the orphan local
+        // directory (the pool removes it only once empty) instead of leaving
+        // it behind forever.
+        entry.Folder -> DeleteLocal(k.path)
+        entry.Blob | entry.GoogleNative | entry.Shortcut(_) ->
+          ForgetKnown(k.file_id)
+      }
     Some(l), Some(r), None ->
       case r.kind {
         // Natives cannot round-trip (no bytes, lossy export), so the remote

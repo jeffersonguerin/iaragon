@@ -71,6 +71,22 @@ pub fn absent_everywhere_noops_test() {
   assert reconcile.reconcile(None, None, None) == Noop
 }
 
+pub fn a_remote_deleted_folder_clears_the_local_directory_test() {
+  // The scan never sees directories, so "gone on both sides" of a folder
+  // only proves the remote side went away: the orphan local directory must
+  // be cleaned up, not just forgotten.
+  let folder_known =
+    KnownFile(
+      ..a_known(),
+      file_id: "id-docs",
+      path: "docs",
+      md5: None,
+      kind: entry.Folder,
+    )
+  assert reconcile.reconcile(None, None, Some(folder_known))
+    == DeleteLocal("docs")
+}
+
 // --- Change detection with all three present --------------------------------
 
 pub fn unchanged_everywhere_noops_test() {

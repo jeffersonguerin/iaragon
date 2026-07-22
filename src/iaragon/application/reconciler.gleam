@@ -613,7 +613,7 @@ fn plan_remote_files(
         Ok(RemoteFile(
           file_id: sighting.file_id,
           name: sighting.name,
-          path: materialized_path(path, kind, sighting.mime_type, policy),
+          path: materialized_path(path, kind, sighting, policy),
           mime_type: sighting.mime_type,
           parent_id: sighting.parent_id,
           modified_time: sighting.modified_time,
@@ -630,12 +630,18 @@ fn plan_remote_files(
 fn materialized_path(
   path: String,
   kind: entry.FileKind,
-  mime_type: String,
+  sighting: RemoteSighting,
   policy: NativeDocPolicy,
 ) -> String {
   case kind {
     GoogleNative ->
-      case native_docs.choose_materialisation(mime_type, policy) {
+      case
+        native_docs.choose_materialisation(
+          sighting.mime_type,
+          policy,
+          size: sighting.size,
+        )
+      {
         native_docs.WriteLinkFile -> path <> ".desktop"
         native_docs.ExportDocument(_export_mime, extension) ->
           path <> "." <> extension

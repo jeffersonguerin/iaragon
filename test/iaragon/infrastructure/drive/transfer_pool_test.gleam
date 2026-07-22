@@ -276,6 +276,56 @@ pub fn deleting_locally_removes_the_file_and_forgets_it_test() {
   assert simplifile.is_file(root <> "/old.txt") == Ok(False)
 }
 
+pub fn deleting_an_empty_directory_removes_and_forgets_it_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/delete-empty-dir"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
+  let pool =
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder),
+    ),
+  )
+
+  process.send(pool, transfer_pool.EnqueueDeleteLocal("id-f", "old-dir"))
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-f") == None })
+  assert simplifile.is_directory(root <> "/old-dir") == Ok(False)
+}
+
+pub fn a_directory_with_content_is_left_alone_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/delete-full-dir"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/old-dir/keep.txt", contents: "precious")
+  let pool =
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder),
+    ),
+  )
+
+  process.send(pool, transfer_pool.EnqueueDeleteLocal("id-f", "old-dir"))
+
+  // Deleting a directory that still has content would be data loss: the
+  // pool must leave both the bytes and the bookkeeping untouched, so the
+  // next round re-decides once the children are gone.
+  process.sleep(150)
+  assert simplifile.read(root <> "/old-dir/keep.txt") == Ok("precious")
+  assert known_of(owner, "id-f") != None
+}
+
 pub fn failed_downloads_are_retried_until_success_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let outcomes = fakes.script_outcomes([Error("boom"), Error("boom"), Ok(Nil)])
@@ -544,6 +594,56 @@ pub fn a_folder_move_renames_the_directory_test() {
   // A plain rename carries the children along in one go.
   assert simplifile.read(root <> "/new-dir/child.txt") == Ok("child")
   assert simplifile.is_directory(root <> "/old-dir") == Ok(False)
+}
+
+pub fn a_folder_move_into_an_occupied_destination_clears_the_empty_source_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/move-occupied"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
+  // The children were already carried one by one into a destination that
+  // existed all along; only the empty source directory is left behind.
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/new-dir")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/new-dir/child.txt", contents: "child")
+  let pool =
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
+  let folder =
+    entry.KnownFile(..a_known_at("id-f", "new-dir"), md5: None, kind: Folder)
+
+  process.send(pool, transfer_pool.EnqueueMoveLocal(folder, from: "old-dir"))
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-f") != None })
+  assert simplifile.is_directory(root <> "/old-dir") == Ok(False)
+  assert simplifile.read(root <> "/new-dir/child.txt") == Ok("child")
+}
+
+pub fn a_move_never_clears_a_source_that_still_has_content_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/move-occupied-full"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/old-dir/keep.txt", contents: "precious")
+  let assert Ok(Nil) = simplifile.create_directory_all(root <> "/new-dir")
+  let pool =
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
+  let folder =
+    entry.KnownFile(..a_known_at("id-f", "new-dir"), md5: None, kind: Folder)
+
+  process.send(pool, transfer_pool.EnqueueMoveLocal(folder, from: "old-dir"))
+
+  // Occupied destination AND a source with content: something is off — the
+  // pool leaves the filesystem alone and lets the next round reconcile it.
+  process.sleep(150)
+  assert simplifile.read(root <> "/old-dir/keep.txt") == Ok("precious")
+  assert known_of(owner, "id-f") == None
 }
 
 // --- Conflicted copies ----------------------------------------------------------

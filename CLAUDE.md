@@ -251,19 +251,33 @@ carregam `shortcut_target_id`; shortcut com alvo entra no espelho como
 link `.desktop` para o ALVO (`classify_sighting`); sem alvo visível fica
 fora, como antes.
 
-Limitações conhecidas: export falha para doc >10 MB (limite da API) e o
-download é re-decidido a cada rodada (1 chamada perdida por rodada, sem
-fallback automático p/ link); trocar `NativeDocPolicy` com espelho povoado
-move o arquivo antigo para o path novo sem re-exportar (conteúdo velho até
-a próxima edição remota do doc); pasta antiga pode sobrar vazia se o
-destino do move já existia (rodadas seguintes não a removem); deleção
-local de pasta vazia não propaga (ver sessão 8); rename local com edição
-simultânea do conteúdo muda a assinatura e vira trash+re-upload (converge,
-mas re-transfere).
+Fase robustez do espelho (sessão 10): **pasta deletada no Drive limpa o
+diretório local** — `(None, None, Some(k))` com `k.kind == Folder` decide
+`DeleteLocal` (não `ForgetKnown`): pasta é invisível ao scan, então "ambos
+sumiram" só prova o lado remoto. No pool, `EnqueueDeleteLocal` de
+diretório remove **SÓ se vazio** e só então esquece o known
+(`simplifile.delete` em dir é RECURSIVO — sem o guard, bytes nunca-sincados
+dentro da pasta seriam perdidos); não-vazio → nada, a rodada seguinte
+re-decide e converge quando os filhos forem deletados. **Move com destino
+ocupado limpa origem vazia**: filhos já carregados um a um → origem vazia
+é removida e o move vira bookkeeping; origem com conteúdo mantém o erro.
+**Guarda de 10 MB no domínio**: `choose_materialisation(mime, policy,
+size:)` — nativo com size reportado acima do limite materializa como link
+em vez de perder uma chamada de export por rodada (reconciler e pool usam
+o MESMO ponto de entrada — extensão e bytes nunca divergem).
+
+Limitações conhecidas: o size reportado do nativo é proxy do tamanho do
+EXPORT (diferem nos dois sentidos: export grande com size pequeno ainda
+re-tenta e falha por rodada; o inverso vira link sem tentar); trocar
+`NativeDocPolicy` com espelho povoado move o arquivo antigo para o path
+novo sem re-exportar (conteúdo velho até a próxima edição remota do doc);
+deleção local de pasta vazia não propaga (ver sessão 8); rename local com
+edição simultânea do conteúdo muda a assinatura e vira trash+re-upload
+(converge, mas re-transfere).
 
 **Próximas sessões**: watcher inotify (filespy) como alternativa ao
-polling do polly, overlays de file manager, remoção de pastas vazias
-órfãs, fallback de export p/ >10 MB.
+polling do polly, overlays de file manager, re-export ao trocar
+`NativeDocPolicy`.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

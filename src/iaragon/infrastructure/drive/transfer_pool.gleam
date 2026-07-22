@@ -153,8 +153,7 @@ fn handle_command(
     RetryDownload(remote, failed_attempts) ->
       run_download(state, remote, failed_attempts)
     EnqueueDeleteLocal(file_id, path) -> {
-      let _ = simplifile.delete(state.config.root_dir <> "/" <> path)
-      process.send(state.config.state_owner, state_owner.ForgetKnown(file_id))
+      run_delete_local(state.config, file_id, path)
       actor.continue(state)
     }
     EnqueueUpload(plan) -> run_upload(state, plan, 0)
@@ -174,6 +173,39 @@ fn handle_command(
       run_conflict_copy(state, remote, copy_path, 0)
     RetryConflictCopy(remote, copy_path, failed_attempts) ->
       run_conflict_copy(state, remote, copy_path, failed_attempts)
+  }
+}
+
+// --- Local deletions --------------------------------------------------------------
+
+/// `simplifile.delete` on a directory is recursive, and a directory that
+/// still has content may hold bytes that never synced: only an EMPTY
+/// directory is removed (and forgotten). A non-empty one is left untouched —
+/// its children carry their own delete decisions, and the next round
+/// re-decides this one once they are gone.
+fn run_delete_local(
+  config: TransferConfig,
+  file_id: String,
+  path: String,
+) -> Nil {
+  let target = config.root_dir <> "/" <> path
+  let removed = case simplifile.is_directory(target) {
+    Ok(True) ->
+      case simplifile.read_directory(target) {
+        Ok([]) -> {
+          let _ = simplifile.delete(target)
+          True
+        }
+        _ -> False
+      }
+    _ -> {
+      let _ = simplifile.delete(target)
+      True
+    }
+  }
+  case removed {
+    True -> process.send(config.state_owner, state_owner.ForgetKnown(file_id))
+    False -> Nil
   }
 }
 
@@ -200,9 +232,16 @@ fn run_move_local(
       // Already carried to its destination (e.g. by a parent folder rename).
       False, True -> Ok(Nil)
       False, False -> Error("neither source nor destination exists")
-      // Both exist: something else occupies the destination — leave the
-      // filesystem alone and let the next round reconcile the difference.
-      True, True -> Error("destination already occupied")
+      // Both exist. An EMPTY source directory means the children were
+      // already carried into the pre-existing destination one by one: clear
+      // the leftover and count the move as done. Anything with content is
+      // suspicious — leave the filesystem alone and let the next round
+      // reconcile the difference.
+      True, True ->
+        case simplifile.read_directory(source) {
+          Ok([]) -> simplifile.delete(source) |> describe_error
+          _ -> Error("destination already occupied")
+        }
     }
   }
   case moved {
@@ -405,6 +444,7 @@ fn materialize(
         native_docs.choose_materialisation(
           remote.mime_type,
           config.native_policy,
+          size: remote.size,
         )
       {
         native_docs.WriteLinkFile ->

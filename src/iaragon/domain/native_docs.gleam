@@ -4,6 +4,7 @@
 //// (drawings export only to images/PDF; forms, sites, maps have no export)
 //// stays a browser link under every policy. Pure data — no I/O.
 
+import gleam/option.{type Option, Some}
 import iaragon/domain/entry.{
   type NativeDocPolicy, ExportOdf, ExportOffice, LinkFile,
 }
@@ -16,7 +17,28 @@ pub type NativeMaterialisation {
   ExportDocument(export_mime: String, extension: String)
 }
 
+/// The export endpoint refuses documents above 10 MB. The size Drive reports
+/// for a native is a proxy for the exported size (they differ), but it is
+/// the only pre-flight signal — a doc reported above the limit falls back to
+/// a link instead of losing an export call every round.
+const export_size_limit_bytes = 10_485_760
+
 pub fn choose_materialisation(
+  mime_type: String,
+  policy: NativeDocPolicy,
+  size size: Option(Int),
+) -> NativeMaterialisation {
+  case size {
+    Some(bytes) ->
+      case bytes > export_size_limit_bytes {
+        True -> WriteLinkFile
+        False -> choose_by_policy(mime_type, policy)
+      }
+    option.None -> choose_by_policy(mime_type, policy)
+  }
+}
+
+fn choose_by_policy(
   mime_type: String,
   policy: NativeDocPolicy,
 ) -> NativeMaterialisation {
