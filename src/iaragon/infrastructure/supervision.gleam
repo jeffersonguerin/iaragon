@@ -19,6 +19,7 @@ import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/fs/hashing
 import iaragon/infrastructure/fs/local_scan
 import iaragon/infrastructure/fs/local_watcher
+import polly
 
 pub type Daemon {
   Daemon(
@@ -34,6 +35,10 @@ pub type Daemon {
 const poll_interval_ms = 30_000
 
 const round_interval_ms = 30_000
+
+const watch_poll_interval_ms = 2000
+
+const watch_debounce_ms = 1500
 
 /// YYYY-MM-DD in UTC, for conflicted-copy names.
 fn build_date_stamp() -> String {
@@ -151,9 +156,26 @@ pub fn start_daemon(
       today: build_date_stamp,
     )
 
+  let watcher_config =
+    local_watcher.WatcherConfig(
+      deliver: reconciler_subject,
+      debounce_ms: watch_debounce_ms,
+    )
+
   static_supervisor.new(static_supervisor.OneForOne)
   |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
-  |> static_supervisor.add(local_watcher.supervised(local_watcher_name))
+  |> static_supervisor.add(local_watcher.supervised(
+    local_watcher_name,
+    watcher_config,
+  ))
+  |> static_supervisor.add(
+    local_watcher.build_watch_options(
+      mirror_root,
+      process.named_subject(local_watcher_name),
+      poll_interval_ms: watch_poll_interval_ms,
+    )
+    |> polly.supervised,
+  )
   |> static_supervisor.add(remote_poller.supervised(
     remote_poller_name,
     poller_config,

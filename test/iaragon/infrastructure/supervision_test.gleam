@@ -115,9 +115,15 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
   // reconciles to nothing but proves the round-trip through the tree.
   process.send(daemon.reconciler, reconciler.SeedMirror("root", []))
 
-  // The last stub is alive under the supervisor and answers a ping.
-  assert process.call(daemon.local_watcher, call_timeout, local_watcher.Ping)
-    == Nil
+  // The watcher is alive: local activity flows through without crashing the
+  // tree (the debounced round lands on the already-seeded reconciler).
+  process.send(daemon.local_watcher, local_watcher.NoticeLocalActivity)
+  assert process.call(
+      daemon.state_owner,
+      call_timeout,
+      state_owner.GetPageToken,
+    )
+    == Some("token-1")
 }
 
 fn wait_for_page_token(
