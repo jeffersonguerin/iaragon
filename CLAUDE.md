@@ -140,7 +140,27 @@ de arquivos.
 3. Bidirecional com detecção de conflito
 4. Overlays no gerenciador de arquivos
 
-**Download-only FUNCIONAL de ponta a ponta.** Feito: domínio puro
+**Download-only E upload FUNCIONAIS de ponta a ponta (sync bidirecional
+sem resolução de conflito — conflitos ainda são detectados e ignorados).**
+
+Fase upload (sessão 5): leitura em chunks (`fs/chunked_read` + FFI `file`);
+upload resumable (`drive/upload`: POST/PATCH inicia sessão via Location,
+PUT chunks múltiplos de 256 KB — 8 MiB na composição — com Content-Range,
+308 até o 200/201 final com a projeção `fields` do parser); mutações
+(`drive/mutate`: `create_folder`; **delete local propaga como TRASH**,
+nunca delete permanente); `transfer_pool` com `EnqueueUpload`/
+`EnqueueTrashRemote` (pastas remotas faltantes criadas uma vez — cache por
+parent+nome — e observadas de volta ao modelo) e feedback
+`SettleUpload`/`SettleTrash`; `reconciler` monta `UploadPlan` (âncora = pasta
+remota existente mais profunda + cadeia de pastas faltantes), atualiza
+in-place via file_id do known, **rastreia transferências em voo** (nunca
+re-despacha antes do settle; falha settled re-despacha na rodada seguinte) e
+roda **rodadas periódicas** (30 s) — o gatilho local até o watcher chegar.
+Invariante crítico do feedback: upload concluído entra NO MODELO REMOTO na
+hora via settle; esperar o próximo poll deixaria janela em que o arquivo
+parece remoto-ausente e seria apagado localmente.
+
+Fases anteriores: domínio puro
 (`SyncDecision`, `reconcile`/`reconcile_all`, `paths.resolve_paths`); OAuth
 desktop completo (PKCE, loopback FFI, `token_manager` com refresh por margem
 de 60 s); clientes Drive (Changes paginado, `files.list` + `files/root` em
@@ -176,10 +196,12 @@ uma decisão de bookkeeping no domínio); shortcuts ficam fora do espelho
 (precisam de `shortcutDetails` na projeção); export de nativos
 (ExportOffice/ExportOdf) ainda materializa como link.
 
-**Próximas sessões**: fase upload (upload resumable via FFI — chunks 256 KB —,
-UploadLocal/DeleteRemote reais, `files.create`/`files.update`), watcher
-inotify real (filespy) disparando rodadas locais, bidirecional com resolução
-de conflito, e as limitações acima.
+**Próximas sessões**: resolução de conflito (hoje `Conflict` é detectado e
+ignorado — decidir política: cópia "conflicted" estilo Dropbox?), watcher
+inotify real (filespy/polly) substituindo/complementando as rodadas
+periódicas, renames como renames (hoje viram delete+create), export real de
+nativos (ExportOffice/ExportOdf), shortcutDetails, overlays de file manager,
+e as limitações acima.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

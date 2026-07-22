@@ -36,9 +36,7 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       mirror_root: "build/test-scratch/supervision/mirror",
       transfers: transfer_pool.DriveTransferOps(
         fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
-        upload_to_drive: fn(_target, _source, _size) {
-          Error("not under test")
-        },
+        upload_to_drive: fn(_target, _source, _size) { Error("not under test") },
         create_remote_folder: fn(_name, _parent) { Error("not under test") },
         trash_remote: fn(_file_id) { Error("not under test") },
       ),

@@ -89,9 +89,9 @@ fn initiate_session(
   case response.status {
     200 ->
       response.get_header(response, "location")
-      |> result.replace_error(
-        UnexpectedPayload("no session URI in the initiate response"),
-      )
+      |> result.replace_error(UnexpectedPayload(
+        "no session URI in the initiate response",
+      ))
     status -> Error(RefusedByServer(status, response.body))
   }
 }
@@ -128,9 +128,9 @@ fn send_chunks(
         <> int.to_string(total_size)
       use put <- result.try(
         request.to(session_url)
-        |> result.replace_error(
-          UnexpectedPayload("unparseable session URI: " <> session_url),
-        ),
+        |> result.replace_error(UnexpectedPayload(
+          "unparseable session URI: " <> session_url,
+        )),
       )
       let put =
         put

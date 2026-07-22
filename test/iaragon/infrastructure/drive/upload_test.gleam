@@ -51,9 +51,12 @@ fn a_session_send(
           True ->
             case string.contains(content_range, "-5/6") {
               True ->
-                Ok(response.Response(status: 200, headers: [], body: a_file_payload))
-              False ->
-                Ok(response.Response(status: 308, headers: [], body: ""))
+                Ok(response.Response(
+                  status: 200,
+                  headers: [],
+                  body: a_file_payload,
+                ))
+              False -> Ok(response.Response(status: 308, headers: [], body: ""))
             }
           False -> panic as { "unexpected content-range: " <> content_range }
         }

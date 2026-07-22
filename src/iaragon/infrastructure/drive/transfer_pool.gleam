@@ -112,7 +112,10 @@ pub fn start(
   |> actor.start
 }
 
-fn handle_command(state: State, command: Command) -> actor.Next(State, Command) {
+fn handle_command(
+  state: State,
+  command: Command,
+) -> actor.Next(State, Command) {
   case command {
     EnqueueDownload(remote) -> run_download(state, remote, 0)
     RetryDownload(remote, failed_attempts) ->
@@ -123,7 +126,8 @@ fn handle_command(state: State, command: Command) -> actor.Next(State, Command) 
       actor.continue(state)
     }
     EnqueueUpload(plan) -> run_upload(state, plan, 0)
-    RetryUpload(plan, failed_attempts) -> run_upload(state, plan, failed_attempts)
+    RetryUpload(plan, failed_attempts) ->
+      run_upload(state, plan, failed_attempts)
     EnqueueTrashRemote(file_id) -> run_trash(state, file_id, 0)
     RetryTrash(file_id, failed_attempts) ->
       run_trash(state, file_id, failed_attempts)
@@ -155,7 +159,10 @@ fn run_download(
   }
 }
 
-fn materialize(config: TransferConfig, remote: RemoteFile) -> Result(Nil, String) {
+fn materialize(
+  config: TransferConfig,
+  remote: RemoteFile,
+) -> Result(Nil, String) {
   let destination = config.root_dir <> "/" <> remote.path
   use Nil <- result.try(
     simplifile.create_directory_all(filepath.directory_name(destination))
@@ -230,33 +237,34 @@ fn ensure_remote_folders(
   state: State,
   plan: UploadPlan,
 ) -> Result(#(State, String), String) {
-  list.try_fold(plan.missing_folders, #(state, plan.anchor_parent_id), fn(
-    acc,
-    folder_name,
-  ) {
-    let #(state, parent_id) = acc
-    let cache_key = parent_id <> "/" <> folder_name
-    case dict.get(state.created_folders, cache_key) {
-      Ok(folder_id) -> Ok(#(state, folder_id))
-      Error(Nil) -> {
-        use created <- result.try(state.config.create_remote_folder(
-          folder_name,
-          parent_id,
-        ))
-        state.config.observe_folder(remote_poller.translate_file(created))
-        let state =
-          State(
-            ..state,
-            created_folders: dict.insert(
-              state.created_folders,
-              cache_key,
-              created.file_id,
-            ),
-          )
-        Ok(#(state, created.file_id))
+  list.try_fold(
+    plan.missing_folders,
+    #(state, plan.anchor_parent_id),
+    fn(acc, folder_name) {
+      let #(state, parent_id) = acc
+      let cache_key = parent_id <> "/" <> folder_name
+      case dict.get(state.created_folders, cache_key) {
+        Ok(folder_id) -> Ok(#(state, folder_id))
+        Error(Nil) -> {
+          use created <- result.try(state.config.create_remote_folder(
+            folder_name,
+            parent_id,
+          ))
+          state.config.observe_folder(remote_poller.translate_file(created))
+          let state =
+            State(
+              ..state,
+              created_folders: dict.insert(
+                state.created_folders,
+                cache_key,
+                created.file_id,
+              ),
+            )
+          Ok(#(state, created.file_id))
+        }
       }
-    }
-  })
+    },
+  )
 }
 
 fn push_file(
@@ -376,6 +384,8 @@ fn record_known(
   )
 }
 
-fn describe_error(result: Result(a, simplifile.FileError)) -> Result(a, String) {
+fn describe_error(
+  result: Result(a, simplifile.FileError),
+) -> Result(a, String) {
   result.map_error(result, simplifile.describe_error)
 }

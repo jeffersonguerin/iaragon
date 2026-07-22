@@ -289,7 +289,12 @@ pub fn changes_arriving_before_the_seed_are_ignored_test() {
 pub fn a_new_local_file_is_planned_for_upload_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let local =
-    LocalFile(path: "docs/mine.txt", size: 3, mtime_seconds: 1, md5: Some("zzz"))
+    LocalFile(
+      path: "docs/mine.txt",
+      size: 3,
+      mtime_seconds: 1,
+      md5: Some("zzz"),
+    )
   let dispatches = process.new_subject()
   let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
 
@@ -319,7 +324,12 @@ pub fn a_new_local_file_is_planned_for_upload_test() {
 pub fn a_file_in_a_brand_new_directory_lists_missing_folders_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let local =
-    LocalFile(path: "novo/sub/mine.txt", size: 3, mtime_seconds: 1, md5: Some("z"))
+    LocalFile(
+      path: "novo/sub/mine.txt",
+      size: 3,
+      mtime_seconds: 1,
+      md5: Some("z"),
+    )
   let dispatches = process.new_subject()
   let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
 

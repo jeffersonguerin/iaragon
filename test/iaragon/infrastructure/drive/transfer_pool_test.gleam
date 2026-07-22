@@ -1,7 +1,7 @@
 import gleam/erlang/process.{type Subject}
 import gleam/option.{None, Some}
 import gleam/string
-import iaragon/application/reconciler.{RemoteSighting, UploadPlan}
+import iaragon/application/reconciler.{UploadPlan}
 import iaragon/application/state_owner
 import iaragon/domain/entry.{
   Blob, Folder, GoogleNative, LinkFile, LocalFile, RemoteFile, Shortcut,
@@ -37,7 +37,10 @@ type UploadEvent {
   UploadCalled(target: upload.UploadTarget, source: String, size: Int)
   FolderCreated(name: String, parent_id: String)
   TrashCalled(file_id: String)
-  UploadSettled(path: String, outcome: Result(reconciler.RemoteSighting, String))
+  UploadSettled(
+    path: String,
+    outcome: Result(reconciler.RemoteSighting, String),
+  )
   TrashSettled(file_id: String, outcome: Result(Nil, String))
   FolderObserved(sighting: reconciler.RemoteSighting)
 }
@@ -237,7 +240,8 @@ pub fn uploading_a_new_file_creates_records_and_settles_test() {
   let events = process.new_subject()
   let root = scratch_dir <> "/upload-new"
   let assert Ok(Nil) = simplifile.create_directory_all(root)
-  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/mine.txt", contents: "abc")
   let config =
     transfer_pool.TransferConfig(
       ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
@@ -251,7 +255,10 @@ pub fn uploading_a_new_file_creates_records_and_settles_test() {
     )
   let pool = start_pool_with(config)
 
-  process.send(pool, transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")))
+  process.send(
+    pool,
+    transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")),
+  )
 
   let assert Ok(UploadCalled(target, source, 3)) = process.receive(events, 1000)
   assert target == CreateFile(name: "mine.txt", parent_id: "root-1")
@@ -270,7 +277,8 @@ pub fn uploading_a_modified_file_updates_in_place_test() {
   let events = process.new_subject()
   let root = scratch_dir <> "/upload-update"
   let assert Ok(Nil) = simplifile.create_directory_all(root)
-  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/mine.txt", contents: "abc")
   let config =
     transfer_pool.TransferConfig(
       ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
@@ -295,19 +303,23 @@ pub fn missing_folders_are_created_once_and_observed_test() {
   let events = process.new_subject()
   let root = scratch_dir <> "/upload-folders"
   let assert Ok(Nil) = simplifile.create_directory_all(root <> "/docs")
-  let assert Ok(Nil) = simplifile.write(to: root <> "/docs/a.txt", contents: "abc")
-  let assert Ok(Nil) = simplifile.write(to: root <> "/docs/b.txt", contents: "abc")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/docs/a.txt", contents: "abc")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/docs/b.txt", contents: "abc")
   let config =
     transfer_pool.TransferConfig(
       ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
       create_remote_folder: fn(name, parent_id) {
         process.send(events, FolderCreated(name, parent_id))
-        Ok(changes.ChangedFile(
-          ..an_uploaded_file("id-docs", name),
-          mime_type: "application/vnd.google-apps.folder",
-          size: None,
-          md5: None,
-        ))
+        Ok(
+          changes.ChangedFile(
+            ..an_uploaded_file("id-docs", name),
+            mime_type: "application/vnd.google-apps.folder",
+            size: None,
+            md5: None,
+          ),
+        )
       },
       observe_folder: fn(sighting) {
         process.send(events, FolderObserved(sighting))
@@ -344,7 +356,8 @@ pub fn a_failed_upload_retries_then_settles_the_failure_test() {
   let events = process.new_subject()
   let root = scratch_dir <> "/upload-fail"
   let assert Ok(Nil) = simplifile.create_directory_all(root)
-  let assert Ok(Nil) = simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/mine.txt", contents: "abc")
   let config =
     transfer_pool.TransferConfig(
       ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
@@ -355,7 +368,10 @@ pub fn a_failed_upload_retries_then_settles_the_failure_test() {
     )
   let pool = start_pool_with(config)
 
-  process.send(pool, transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")))
+  process.send(
+    pool,
+    transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")),
+  )
 
   let assert Ok(UploadSettled("mine.txt", Error(_))) =
     process.receive(events, 2000)

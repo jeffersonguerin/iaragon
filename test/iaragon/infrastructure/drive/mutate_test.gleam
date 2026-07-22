@@ -1,12 +1,8 @@
-import gleam/bit_array
 import gleam/erlang/process
 import gleam/http
 import gleam/http/request
 import gleam/http/response
-import gleam/list
-import gleam/option.{Some}
 import gleam/string
-import gleam/uri
 import iaragon/infrastructure/drive/changes.{ChangedFile}
 import iaragon/infrastructure/drive/mutate
 
@@ -34,7 +30,12 @@ pub fn creating_a_folder_posts_metadata_test() {
   let send = respond_with(inbox, 200, a_folder_payload)
 
   let assert Ok(created) =
-    mutate.create_folder(send, access_token: "at-1", name: "docs", parent_id: "p-1")
+    mutate.create_folder(
+      send,
+      access_token: "at-1",
+      name: "docs",
+      parent_id: "p-1",
+    )
   let assert ChangedFile(
     file_id: "id-f",
     mime_type: "application/vnd.google-apps.folder",
@@ -72,6 +73,11 @@ pub fn a_refused_mutation_reports_status_test() {
   let send = respond_with(inbox, 403, "quota")
   assert mutate.trash_file(send, access_token: "at-1", file_id: "id-1")
     == Error(changes.RefusedByServer(403, "quota"))
-  assert mutate.create_folder(send, access_token: "at-1", name: "x", parent_id: "p")
+  assert mutate.create_folder(
+      send,
+      access_token: "at-1",
+      name: "x",
+      parent_id: "p",
+    )
     == Error(changes.RefusedByServer(403, "quota"))
 }
