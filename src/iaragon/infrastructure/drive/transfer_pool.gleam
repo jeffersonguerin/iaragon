@@ -221,7 +221,13 @@ fn run_move_remote(
   plan: MoveRemotePlan,
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
-  case ensure_remote_folders_for(state, plan.anchor_parent_id, plan.missing_folders) {
+  case
+    ensure_remote_folders_for(
+      state,
+      plan.anchor_parent_id,
+      plan.missing_folders,
+    )
+  {
     Ok(#(state, parent_id)) ->
       case
         state.config.rename_remote(
@@ -432,7 +438,11 @@ fn run_upload(
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
   case
-    ensure_remote_folders_for(state, plan.anchor_parent_id, plan.missing_folders)
+    ensure_remote_folders_for(
+      state,
+      plan.anchor_parent_id,
+      plan.missing_folders,
+    )
   {
     Ok(#(state, parent_id)) ->
       case push_file(state.config, plan, parent_id) {

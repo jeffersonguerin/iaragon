@@ -118,7 +118,8 @@ pub fn reconcile_all(
   let remote_by_id =
     list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
 
-  let renames = infer_local_renames(locals, remotes, lasts, local_by_path, remote_by_id)
+  let renames =
+    infer_local_renames(locals, remotes, lasts, local_by_path, remote_by_id)
 
   // Known files anchor the join: their file_id claims a remote and their
   // path claims a local file.

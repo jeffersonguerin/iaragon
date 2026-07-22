@@ -332,8 +332,7 @@ pub fn a_local_rename_becomes_a_remote_move_test() {
   // The file vanished from its known path and an identical-looking local
   // (same size, same mtime — `mv` preserves both) appeared elsewhere:
   // that is a rename, not delete-plus-create.
-  let renamed_local =
-    LocalFile(..a_local(), path: "docs/renamed.txt")
+  let renamed_local = LocalFile(..a_local(), path: "docs/renamed.txt")
   assert reconcile.reconcile_all([renamed_local], [a_remote()], [a_known()])
     == [MoveRemote("id-1", "docs/report.txt", "docs/renamed.txt")]
 }
@@ -344,16 +343,18 @@ pub fn an_ambiguous_rename_falls_back_to_delete_and_create_test() {
   let candidate_a = LocalFile(..a_local(), path: "a.txt")
   let candidate_b = LocalFile(..a_local(), path: "b.txt")
   let decisions =
-    reconcile.reconcile_all([candidate_a, candidate_b], [a_remote()], [a_known()])
+    reconcile.reconcile_all([candidate_a, candidate_b], [a_remote()], [
+      a_known(),
+    ])
   assert list.contains(decisions, DeleteRemote("id-1"))
   assert list.contains(decisions, UploadLocal("a.txt"))
   assert list.contains(decisions, UploadLocal("b.txt"))
 }
 
 pub fn a_signature_mismatch_is_not_a_rename_test() {
-  let different =
-    LocalFile(..a_local(), path: "docs/renamed.txt", size: 99)
-  let decisions = reconcile.reconcile_all([different], [a_remote()], [a_known()])
+  let different = LocalFile(..a_local(), path: "docs/renamed.txt", size: 99)
+  let decisions =
+    reconcile.reconcile_all([different], [a_remote()], [a_known()])
   assert list.contains(decisions, DeleteRemote("id-1"))
   assert list.contains(decisions, UploadLocal("docs/renamed.txt"))
 }

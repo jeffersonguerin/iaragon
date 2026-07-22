@@ -602,7 +602,10 @@ type MoveEvent {
     add_parent_id: String,
     remove_parent_id: String,
   )
-  MoveSettled(file_id: String, outcome: Result(reconciler.RemoteSighting, String))
+  MoveSettled(
+    file_id: String,
+    outcome: Result(reconciler.RemoteSighting, String),
+  )
 }
 
 fn a_move_plan(to_path: String, name: String) -> reconciler.MoveRemotePlan {
@@ -630,10 +633,12 @@ pub fn a_remote_move_renames_without_any_transfer_test() {
           events,
           RenameCalled(file_id, new_name, add_parent_id, remove_parent_id),
         )
-        Ok(changes.ChangedFile(
-          ..an_uploaded_file("id-1", new_name),
-          parent_id: Some(add_parent_id),
-        ))
+        Ok(
+          changes.ChangedFile(
+            ..an_uploaded_file("id-1", new_name),
+            parent_id: Some(add_parent_id),
+          ),
+        )
       },
       settle_move: fn(file_id, outcome) {
         process.send(events, MoveSettled(file_id, outcome))
@@ -648,7 +653,8 @@ pub fn a_remote_move_renames_without_any_transfer_test() {
 
   let assert Ok(RenameCalled("id-1", "renamed.txt", "root-1", "id-old-parent")) =
     process.receive(events, 1000)
-  let assert Ok(MoveSettled("id-1", Ok(sighting))) = process.receive(events, 1000)
+  let assert Ok(MoveSettled("id-1", Ok(sighting))) =
+    process.receive(events, 1000)
   assert sighting.name == "renamed.txt"
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
   let assert Some(known) = known_of(owner, "id-1")
@@ -665,12 +671,14 @@ pub fn a_move_into_a_new_folder_creates_it_first_test() {
       ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
       create_remote_folder: fn(name, parent_id) {
         process.send(events, RenameCalled("folder", name, parent_id, ""))
-        Ok(changes.ChangedFile(
-          ..an_uploaded_file("id-docs", name),
-          mime_type: "application/vnd.google-apps.folder",
-          size: None,
-          md5: None,
-        ))
+        Ok(
+          changes.ChangedFile(
+            ..an_uploaded_file("id-docs", name),
+            mime_type: "application/vnd.google-apps.folder",
+            size: None,
+            md5: None,
+          ),
+        )
       },
       rename_remote: fn(file_id, new_name, add_parent_id, remove_parent_id) {
         process.send(

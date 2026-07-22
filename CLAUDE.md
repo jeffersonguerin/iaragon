@@ -215,16 +215,36 @@ mudanças pede `Reseed` ao poller; poller mantém CADEIA ÚNICA de polling
 (timer pendente cancelado em Poll fora de banda — senão reseed duplicaria o
 polling para sempre).
 
-Limitações conhecidas: renames LOCAIS ainda viram trash+re-upload
-(convergem, mas re-transferem e perdem o file_id); shortcuts fora do
-espelho (falta `shortcutDetails` na projeção); export de nativos
-(ExportOffice/ExportOdf) ainda materializa como link; pasta antiga pode
-sobrar vazia se o destino do move já existia (rodadas seguintes não a
-removem).
+Fase renames locais (sessão 8): **renames locais viram `MoveRemote`**
+(files.update de name/parents — metadado só, sem re-transferir bytes).
+Inferência pura em `reconcile_all` (`infer_local_renames`): known sumido
+localmente (remoto intacto, não-movido e não-trashed) casa com local novo
+(sem known e sem remoto no path) pela assinatura que um `mv` preserva —
+`#(size, mtime)`. **Só par ÚNICO um-pra-um conta**; qualquer ambiguidade
+cai no delete+create (seguro, só desperdiça). O UploadLocal do destino é
+suprimido via `renamed_to`. `mutate.rename_file` (PATCH files/{id} com
+`name` + `addParents`/`removeParents`); `EnqueueMoveRemote(plan)` no pool
+reusa `ensure_remote_folders_for` (cadeia de pastas faltantes, cache por
+parent+nome); reconciler monta `MoveRemotePlan` (old_parent do modelo,
+âncora como no upload) e segura DOIS pending keys (trash do file_id +
+upload do path destino) até `SettleMove`, que atualiza o modelo remoto na
+hora (mesmo invariante do settle de upload). **Bug latente corrigido**:
+o scan local lista arquivos, nunca diretórios — pasta sincada sempre
+parece localmente ausente; sem o guard `(None, Some(r), Some(k))` com
+`k.kind == Folder -> Noop`, TODA pasta sincada seria trashed a cada
+rodada. Consequência documentada: deleção local de pasta VAZIA não
+propaga (a dos arquivos dela propaga).
 
-**Próximas sessões**: renames locais como renames (files.update de
-name/parents), export real de nativos, shortcutDetails, watcher inotify
-(filespy) como alternativa ao polling do polly, overlays de file manager.
+Limitações conhecidas: shortcuts fora do espelho (falta `shortcutDetails`
+na projeção); export de nativos (ExportOffice/ExportOdf) ainda materializa
+como link; pasta antiga pode sobrar vazia se o destino do move já existia
+(rodadas seguintes não a removem); deleção local de pasta vazia não
+propaga (ver sessão 8); rename local com edição simultânea do conteúdo
+muda a assinatura e vira trash+re-upload (converge, mas re-transfere).
+
+**Próximas sessões**: export real de nativos, shortcutDetails, watcher
+inotify (filespy) como alternativa ao polling do polly, overlays de file
+manager, remoção de pastas vazias órfãs.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

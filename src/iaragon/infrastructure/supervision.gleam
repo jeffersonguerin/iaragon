@@ -108,7 +108,10 @@ pub fn start_daemon(
         )
       },
       settle_move: fn(file_id, outcome) {
-        process.send(reconciler_subject, reconciler.SettleMove(file_id, outcome))
+        process.send(
+          reconciler_subject,
+          reconciler.SettleMove(file_id, outcome),
+        )
       },
       observe_folder: fn(sighting) {
         process.send(
@@ -160,7 +163,10 @@ pub fn start_daemon(
         )
       },
       dispatch_move_remote: fn(plan) {
-        process.send(transfer_pool_subject, transfer_pool.EnqueueMoveRemote(plan))
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueMoveRemote(plan),
+        )
       },
       request_seed: fn() {
         process.send(

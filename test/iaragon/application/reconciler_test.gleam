@@ -642,12 +642,21 @@ pub fn a_remote_edit_survives_a_local_delete_test() {
 
 pub fn a_local_rename_dispatches_a_remote_move_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   // Same size and mtime as the known snapshot, new path: a rename.
   let renamed_local =
-    LocalFile(path: "docs/renamed.txt", size: 42, mtime_seconds: 1000, md5: None)
+    LocalFile(
+      path: "docs/renamed.txt",
+      size: 42,
+      mtime_seconds: 1000,
+      md5: None,
+    )
   let dispatches = process.new_subject()
-  let sut = start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
+  let sut =
+    start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
 
   process.send(
     sut,
@@ -695,11 +704,15 @@ pub fn a_local_rename_dispatches_a_remote_move_test() {
 
 pub fn a_settled_remote_move_stops_being_dispatched_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   let renamed_local =
     LocalFile(path: "renamed.txt", size: 42, mtime_seconds: 1000, md5: None)
   let dispatches = process.new_subject()
-  let sut = start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
+  let sut =
+    start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
   process.send(
     sut,
     reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
@@ -715,7 +728,10 @@ pub fn a_settled_remote_move_stops_being_dispatched_test() {
     ),
   )
   let renamed_sighting =
-    RemoteSighting(..a_sighting("id-1", "renamed.txt", "root"), name: "renamed.txt")
+    RemoteSighting(
+      ..a_sighting("id-1", "renamed.txt", "root"),
+      name: "renamed.txt",
+    )
   process.send(sut, reconciler.SettleMove("id-1", Ok(renamed_sighting)))
 
   assert expect_no_transfers(dispatches)

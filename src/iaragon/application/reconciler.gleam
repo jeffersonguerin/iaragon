@@ -485,11 +485,7 @@ fn dispatch_move_remote_once(
   root_id: String,
 ) -> State {
   let in_flight = set.contains(state.pending_trashes, file_id)
-  case
-    in_flight,
-    dict.get(state.model, file_id),
-    dict.get(locals_by_path, to)
-  {
+  case in_flight, dict.get(state.model, file_id), dict.get(locals_by_path, to) {
     False, Ok(sighting), Ok(local) -> {
       let #(directory_segments, name) = split_file_name(to)
       let #(anchor_parent_id, missing_folders) =
