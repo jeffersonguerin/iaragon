@@ -341,6 +341,8 @@ fn run_round(state: State) -> State {
         }
         state
       }
+      // Dispatch wired after the remote-move transfer support lands.
+      decision.MoveRemote(_file_id, _from, _to) -> state
       decision.AdoptKnown(file_id, path) -> {
         adopt_twin(config, file_id, path, remote_by_id, locals_by_path)
         state

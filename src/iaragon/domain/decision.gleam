@@ -17,6 +17,10 @@ pub type SyncDecision {
   /// The remote file was renamed or moved: relocate the mirror copy. Any
   /// simultaneous content change is picked up on the round after the move.
   MoveLocal(file_id: String, from: String, to: String)
+  /// The LOCAL file was renamed or moved (inferred by pairing a vanished
+  /// known with an identical-looking new local): rename the remote file
+  /// instead of re-uploading its bytes.
+  MoveRemote(file_id: String, from: String, to: String)
   Conflict(path: String, file_id: String, kind: ConflictKind)
   /// Both sides are gone: drop the stale entry from the sync index so the
   /// state table does not leak.

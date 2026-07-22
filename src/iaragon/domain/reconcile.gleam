@@ -12,7 +12,7 @@ import gleam/set
 import iaragon/domain/decision.{
   type SyncDecision, AdoptKnown, BothCreated, Conflict, DeleteLocal,
   DeleteRemote, DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete,
-  MoveLocal, Noop, RemoteEditLocalDelete, UploadLocal,
+  MoveLocal, MoveRemote, Noop, RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
 
@@ -110,16 +110,24 @@ pub fn reconcile_all(
   let remote_by_id =
     list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
 
+  let renames = infer_local_renames(locals, remotes, lasts, local_by_path, remote_by_id)
+
   // Known files anchor the join: their file_id claims a remote and their
   // path claims a local file.
   let known_decisions =
     list.map(lasts, fn(k) {
-      reconcile(
-        option.from_result(dict.get(local_by_path, k.path)),
-        option.from_result(dict.get(remote_by_id, k.file_id)),
-        Some(k),
-      )
+      case dict.get(renames, k.file_id) {
+        Ok(to) -> MoveRemote(k.file_id, k.path, to)
+        Error(Nil) ->
+          reconcile(
+            option.from_result(dict.get(local_by_path, k.path)),
+            option.from_result(dict.get(remote_by_id, k.file_id)),
+            Some(k),
+          )
+      }
     })
+  let renamed_to =
+    dict.fold(renames, set.new(), fn(acc, _file_id, to) { set.insert(acc, to) })
   let claimed_paths =
     list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
   let claimed_ids =
@@ -146,15 +154,83 @@ pub fn reconcile_all(
       set.insert(acc, r.path)
     })
 
-  // Locals nothing has claimed are brand new on this side.
+  // Locals nothing has claimed are brand new on this side — unless they are
+  // the destination of an inferred rename.
   let local_decisions =
     locals
-    |> list.filter(fn(l) { !set.contains(claimed_paths, l.path) })
+    |> list.filter(fn(l) {
+      !set.contains(claimed_paths, l.path) && !set.contains(renamed_to, l.path)
+    })
     |> list.map(fn(l) { reconcile(Some(l), None, None) })
 
   [known_decisions, remote_decisions, local_decisions]
   |> list.flatten
   |> list.filter(fn(decision) { decision != Noop })
+}
+
+/// Pair vanished knowns (local gone, remote untouched and unmoved) with new
+/// locals (no known, no remote at their path) by the cheap signature that a
+/// `mv` preserves: size + mtime. Only UNIQUE one-to-one signature matches
+/// count — anything ambiguous falls back to delete-plus-create, which is
+/// always safe, just wasteful.
+fn infer_local_renames(
+  locals: List(LocalFile),
+  remotes: List(RemoteFile),
+  lasts: List(KnownFile),
+  local_by_path: dict.Dict(String, LocalFile),
+  remote_by_id: dict.Dict(String, RemoteFile),
+) -> dict.Dict(String, String) {
+  let known_paths =
+    list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
+  let remote_paths =
+    list.fold(remotes, set.new(), fn(acc, r) {
+      case r.trashed {
+        True -> acc
+        False -> set.insert(acc, r.path)
+      }
+    })
+
+  let vanished =
+    list.filter(lasts, fn(k) {
+      !dict.has_key(local_by_path, k.path)
+      && case dict.get(remote_by_id, k.file_id) {
+        Ok(r) -> !r.trashed && r.path == k.path && !detect_remote_change(r, k)
+        Error(Nil) -> False
+      }
+    })
+  let fresh_locals =
+    list.filter(locals, fn(l) {
+      !set.contains(known_paths, l.path) && !set.contains(remote_paths, l.path)
+    })
+
+  let vanished_by_signature =
+    list.fold(vanished, dict.new(), fn(acc, k) {
+      collect_by_signature(acc, #(k.size, k.local_mtime_seconds), k)
+    })
+  let fresh_by_signature =
+    list.fold(fresh_locals, dict.new(), fn(acc, l) {
+      collect_by_signature(acc, #(l.size, l.mtime_seconds), l)
+    })
+
+  dict.fold(vanished_by_signature, dict.new(), fn(acc, signature, knowns) {
+    case knowns, dict.get(fresh_by_signature, signature) {
+      [known], Ok([local]) -> dict.insert(acc, known.file_id, local.path)
+      _, _ -> acc
+    }
+  })
+}
+
+fn collect_by_signature(
+  acc: dict.Dict(#(Int, Int), List(a)),
+  signature: #(Int, Int),
+  value: a,
+) -> dict.Dict(#(Int, Int), List(a)) {
+  dict.upsert(acc, signature, fn(existing) {
+    case existing {
+      Some(values) -> [value, ..values]
+      None -> [value]
+    }
+  })
 }
 
 /// Cheap metadata first (size + mtime); when both sides carry an md5 it is

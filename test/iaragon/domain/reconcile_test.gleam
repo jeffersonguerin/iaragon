@@ -1,7 +1,8 @@
+import gleam/list
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
   AdoptKnown, BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote,
-  EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop,
+  EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, MoveRemote, Noop,
   RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{
@@ -297,6 +298,56 @@ pub fn native_untouched_noops_test() {
       Some(a_native_known()),
     )
     == Noop
+}
+
+// --- reconcile_all: local renames inferred as remote moves --------------------
+
+pub fn a_local_rename_becomes_a_remote_move_test() {
+  // The file vanished from its known path and an identical-looking local
+  // (same size, same mtime — `mv` preserves both) appeared elsewhere:
+  // that is a rename, not delete-plus-create.
+  let renamed_local =
+    LocalFile(..a_local(), path: "docs/renamed.txt")
+  assert reconcile.reconcile_all([renamed_local], [a_remote()], [a_known()])
+    == [MoveRemote("id-1", "docs/report.txt", "docs/renamed.txt")]
+}
+
+pub fn an_ambiguous_rename_falls_back_to_delete_and_create_test() {
+  // Two identical-looking new locals: no way to tell which one is the
+  // rename. Fall back to the safe behaviour.
+  let candidate_a = LocalFile(..a_local(), path: "a.txt")
+  let candidate_b = LocalFile(..a_local(), path: "b.txt")
+  let decisions =
+    reconcile.reconcile_all([candidate_a, candidate_b], [a_remote()], [a_known()])
+  assert list.contains(decisions, DeleteRemote("id-1"))
+  assert list.contains(decisions, UploadLocal("a.txt"))
+  assert list.contains(decisions, UploadLocal("b.txt"))
+}
+
+pub fn a_signature_mismatch_is_not_a_rename_test() {
+  let different =
+    LocalFile(..a_local(), path: "docs/renamed.txt", size: 99)
+  let decisions = reconcile.reconcile_all([different], [a_remote()], [a_known()])
+  assert list.contains(decisions, DeleteRemote("id-1"))
+  assert list.contains(decisions, UploadLocal("docs/renamed.txt"))
+}
+
+pub fn a_rename_with_a_remote_edit_is_not_inferred_test() {
+  // The remote side changed while the local file moved: keep the existing
+  // conservative path (edit survives via the conflict machinery).
+  let renamed_local = LocalFile(..a_local(), path: "docs/renamed.txt")
+  let edited_remote =
+    RemoteFile(
+      ..a_remote(),
+      md5: Some("ccc"),
+      modified_time: "2026-07-02T09:00:00Z",
+    )
+  let decisions =
+    reconcile.reconcile_all([renamed_local], [edited_remote], [a_known()])
+  assert !list.contains(
+    decisions,
+    MoveRemote("id-1", "docs/report.txt", "docs/renamed.txt"),
+  )
 }
 
 // --- reconcile_all: joining the three collections ----------------------------
