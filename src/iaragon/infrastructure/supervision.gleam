@@ -19,7 +19,6 @@ import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/fs/hashing
 import iaragon/infrastructure/fs/local_scan
 import iaragon/infrastructure/fs/local_watcher
-import polly
 
 pub type Daemon {
   Daemon(
@@ -194,13 +193,11 @@ pub fn start_daemon(
     local_watcher_name,
     watcher_config,
   ))
-  |> static_supervisor.add(
-    local_watcher.build_watch_options(
-      mirror_root,
-      process.named_subject(local_watcher_name),
-      poll_interval_ms: watch_poll_interval_ms,
-    )
-    |> polly.supervised,
+  |> local_watcher.add_watch_source(
+    mirror_root,
+    process.named_subject(local_watcher_name),
+    poll_interval_ms: watch_poll_interval_ms,
+    use_inotify: local_watcher.detect_inotify_support(),
   )
   |> static_supervisor.add(remote_poller.supervised(
     remote_poller_name,

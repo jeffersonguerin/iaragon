@@ -44,13 +44,14 @@ de arquivos.
   `supervised()` pronto), gleam_crypto 1.6.x (PKCE), filepath 1.1.x,
   envoy 1.2.x ($HOME), sqlight 1.2.x (NIF esqlite — exige gcc/make no build).
 - FFI Erlang só quando indispensável e fino: `src/iaragon_loopback_ffi.erl`
-  (gen_tcp one-shot para o redirect OAuth) e `src/iaragon_download_ffi.erl`
+  (gen_tcp one-shot para o redirect OAuth), `src/iaragon_download_ffi.erl`
   (httpc `{stream, path}` para download direto a disco; TLS confia no default
-  verify_peer do httpc em OTP ≥ 26 — mesma premissa do gleam_httpc).
+  verify_peer do httpc em OTP ≥ 26 — mesma premissa do gleam_httpc),
+  `src/iaragon_file_ffi.erl` (leitura em chunks p/ upload resumable) e
+  `src/iaragon_exec_ffi.erl` (os:find_executable p/ detectar inotify-tools).
   Armadilha aprendida: `{stream, path}` FAZ APPEND em arquivo existente — por
   isso downloads vão para `<dest>.iaragon-partial` e são renomeados no
-  sucesso (atomicidade de espelho de graça). Upload resumable será o próximo
-  FFI (fase upload).
+  sucesso (atomicidade de espelho de graça).
 - Testes: gleeunit. Rodar com `gleam test`; build com `gleam build`.
 - **API gleam_otp 1.2** (pós-1.0, mudou muito — não usar API antiga):
   `actor.new(state) |> actor.on_message(fn) |> actor.named(name) |> actor.start`;
@@ -275,8 +276,24 @@ deleção local de pasta vazia não propaga (ver sessão 8); rename local com
 edição simultânea do conteúdo muda a assinatura e vira trash+re-upload
 (converge, mas re-transfere).
 
-**Próximas sessões**: watcher inotify (filespy) como alternativa ao
-polling do polly, overlays de file manager, re-export ao trocar
+Fase watcher inotify (sessão 11): **eventos reais de FS via filespy**
+atrás do mesmo `NoticeLocalActivity` — o debounce e o `ReconcileNow`
+continuam no ator `local_watcher`, só a FONTE muda.
+`local_watcher.add_watch_source(builder, root, notify, poll_interval_ms:,
+use_inotify:)` adiciona à árvore o filho certo: filespy
+(`new |> add_dir |> set_handler |> start`, embrulhado em
+`supervision.worker` — filespy 0.7 não tem `supervised()`) ou polly como
+fallback. A escolha é da composição: `detect_inotify_support()` via FFI
+`os:find_executable("inotifywait")` — filespy exige inotify-tools em
+runtime; sem ele o daemon cai no polling do polly sem mudança de
+comportamento. O diretório do espelho é criado antes do watch (inotify
+recusa dir inexistente). Rodada periódica de 30 s segue de backstop
+(inotifywait não cobre todos os casos, ex. subdirs novos). O teste do
+caminho inotify prova a origem do evento com polling de 1 h e é no-op em
+máquina sem inotify-tools (lá roda o caminho polly, que tem teste
+próprio).
+
+**Próximas sessões**: overlays de file manager, re-export ao trocar
 `NativeDocPolicy`.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
@@ -298,5 +315,7 @@ state errado invalida qualquer resultado; httpc `{stream, path}` faz append
   sessão, extrair da imagem OCI oficial `ghcr.io/gleam-lang/gleam:vX.Y.Z-scratch`
   (binário musl estático em `/bin/gleam`, baixável com curl + Bearer token
   anônimo do ghcr.io).
-- O "backend port not found: inotifywait" nos testes é a app `fs` do filespy
-  avisando que inotify-tools falta — inofensivo enquanto o watcher é stub.
+- `apt-get install inotify-tools`: necessário para o backend inotify real
+  (filespy/fs) — sem ele a app `fs` loga "backend port not found:
+  inotifywait" (inofensivo) e o daemon usa o fallback polly; o teste
+  end-to-end do inotify vira no-op.

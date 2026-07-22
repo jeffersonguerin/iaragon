@@ -1,4 +1,5 @@
 import gleam/erlang/process.{type Subject}
+import gleam/otp/static_supervisor
 import iaragon/application/reconciler
 import iaragon/infrastructure/fs/local_watcher.{WatcherConfig}
 import polly
@@ -68,4 +69,67 @@ pub fn filesystem_changes_flow_through_polly_test() {
     simplifile.write(to: root <> "/fresh.txt", contents: "hello")
 
   assert process.receive(deliver, 3000) == Ok(reconciler.ReconcileNow)
+}
+
+// --- Backend selection ----------------------------------------------------------
+
+pub fn executables_are_located_on_the_path_test() {
+  assert local_watcher.find_executable("sh") == True
+  assert local_watcher.find_executable("no-such-tool-iaragon") == False
+}
+
+pub fn the_polling_source_feeds_the_watcher_through_the_tree_test() {
+  let root = "build/test-scratch/local_watcher/source-polly"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let deliver = process.new_subject()
+  let watcher = start_watcher(deliver, 25)
+
+  let assert Ok(_) =
+    static_supervisor.new(static_supervisor.OneForOne)
+    |> local_watcher.add_watch_source(
+      root,
+      watcher,
+      poll_interval_ms: 25,
+      use_inotify: False,
+    )
+    |> static_supervisor.start
+
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/fresh.txt", contents: "hello")
+
+  assert process.receive(deliver, 3000) == Ok(reconciler.ReconcileNow)
+}
+
+pub fn the_inotify_source_feeds_the_watcher_through_the_tree_test() {
+  case local_watcher.detect_inotify_support() {
+    // Without inotify-tools the daemon runs on the polly fallback anyway;
+    // there is no inotify path to exercise on this machine.
+    False -> Nil
+    True -> {
+      let root = "build/test-scratch/local_watcher/source-inotify"
+      let assert Ok(Nil) = simplifile.create_directory_all(root)
+      let deliver = process.new_subject()
+      let watcher = start_watcher(deliver, 25)
+
+      let assert Ok(_) =
+        static_supervisor.new(static_supervisor.OneForOne)
+        |> local_watcher.add_watch_source(
+          root,
+          watcher,
+          // An hour: an event arriving fast proves it came from inotify,
+          // not from a poll.
+          poll_interval_ms: 3_600_000,
+          use_inotify: True,
+        )
+        |> static_supervisor.start
+
+      // Give inotifywait a moment to set up its watches.
+      process.sleep(500)
+      let assert Ok(Nil) =
+        simplifile.write(to: root <> "/fresh.txt", contents: "hello")
+
+      assert process.receive(deliver, 5000) == Ok(reconciler.ReconcileNow)
+      Nil
+    }
+  }
 }
