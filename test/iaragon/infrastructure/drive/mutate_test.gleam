@@ -2,7 +2,10 @@ import gleam/erlang/process
 import gleam/http
 import gleam/http/request
 import gleam/http/response
+import gleam/list
+import gleam/option
 import gleam/string
+import gleam/uri
 import iaragon/infrastructure/drive/changes.{ChangedFile}
 import iaragon/infrastructure/drive/mutate
 
@@ -66,6 +69,36 @@ pub fn trashing_patches_the_trashed_flag_test() {
   assert sent.method == http.Patch
   assert sent.path == "/drive/v3/files/id-1"
   assert sent.body == "{\"trashed\":true}"
+}
+
+const a_renamed_payload = "{\"id\":\"id-1\",\"name\":\"renamed.txt\","
+  <> "\"mimeType\":\"text/plain\",\"parents\":[\"id-new-parent\"],"
+  <> "\"modifiedTime\":\"2026-07-22T10:00:00Z\",\"size\":\"42\","
+  <> "\"md5Checksum\":\"aaa\",\"trashed\":false}"
+
+pub fn renaming_patches_name_and_swaps_parents_test() {
+  let inbox = process.new_subject()
+  let send = respond_with(inbox, 200, a_renamed_payload)
+
+  let assert Ok(renamed) =
+    mutate.rename_file(
+      send,
+      access_token: "at-1",
+      file_id: "id-1",
+      new_name: "renamed.txt",
+      add_parent_id: "id-new-parent",
+      remove_parent_id: "id-old-parent",
+    )
+  let assert ChangedFile(file_id: "id-1", name: "renamed.txt", ..) = renamed
+
+  let assert Ok(sent) = process.receive(inbox, 100)
+  assert sent.method == http.Patch
+  assert sent.path == "/drive/v3/files/id-1"
+  assert string.contains(sent.body, "\"name\":\"renamed.txt\"")
+  let assert option.Some(query) = sent.query
+  let assert Ok(params) = uri.parse_query(query)
+  assert list.key_find(params, "addParents") == Ok("id-new-parent")
+  assert list.key_find(params, "removeParents") == Ok("id-old-parent")
 }
 
 pub fn a_refused_mutation_reports_status_test() {

@@ -38,6 +38,35 @@ pub fn create_folder(
   |> result.replace_error(UnexpectedPayload(body))
 }
 
+/// Rename and/or move a file without touching its bytes: files.update with
+/// the new name in the body and the parent swap in the query (single-parent
+/// world: one added, one removed).
+pub fn rename_file(
+  send: SendRequest,
+  access_token access_token: String,
+  file_id file_id: String,
+  new_name new_name: String,
+  add_parent_id add_parent_id: String,
+  remove_parent_id remove_parent_id: String,
+) -> Result(ChangedFile, DriveError) {
+  let request =
+    build_json_request(
+      access_token,
+      http.Patch,
+      "/drive/v3/files/" <> file_id,
+      json.object([#("name", json.string(new_name))]),
+    )
+    |> request.set_query([
+      #("addParents", add_parent_id),
+      #("removeParents", remove_parent_id),
+      #("fields", fields_projection),
+    ])
+
+  use body <- result.try(fetch_ok_body(send, request))
+  json.parse(from: body, using: changes.changed_file_decoder())
+  |> result.replace_error(UnexpectedPayload(body))
+}
+
 pub fn trash_file(
   send: SendRequest,
   access_token access_token: String,
