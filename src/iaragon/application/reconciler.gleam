@@ -88,16 +88,22 @@ pub type ReconcilerConfig {
     state_owner: Subject(state_owner.Command),
     dispatch_download: fn(RemoteFile) -> Nil,
     dispatch_delete_local: fn(String, String) -> Nil,
+    dispatch_upload: fn(UploadPlan) -> Nil,
+    dispatch_trash_remote: fn(String) -> Nil,
     scan_local: fn() -> Result(List(LocalFile), String),
     /// Hash a mirror-relative path on demand (md5, lowercase hex).
     hash_local_file: fn(String) -> Result(String, String),
     native_policy: NativeDocPolicy,
+    /// Local edits have no push trigger yet (no watcher): rounds re-run on
+    /// this interval once the mirror is seeded.
+    round_interval_ms: Int,
   )
 }
 
 type State {
   State(
     config: ReconcilerConfig,
+    self: Subject(Command),
     root_id: Option(String),
     model: Dict(String, RemoteSighting),
     /// Paths with an upload in flight and file ids with a trash in flight:
@@ -128,6 +134,7 @@ pub fn start(
 ) -> actor.StartResult(Subject(Command)) {
   actor.new(State(
     config: config,
+    self: process.named_subject(name),
     root_id: None,
     model: dict.new(),
     pending_uploads: set.new(),
@@ -149,18 +156,29 @@ fn handle_command(
         |> list.filter(fn(sighting) { !sighting.trashed })
         |> list.map(fn(sighting) { #(sighting.file_id, sighting) })
         |> dict.from_list
+      // Arm the periodic timer exactly once (each ReconcileNow re-arms it);
+      // a re-seed after a poller restart must not add a second timer chain.
+      case state.root_id {
+        None -> {
+          let _ =
+            process.send_after(
+              state.self,
+              state.config.round_interval_ms,
+              ReconcileNow,
+            )
+          Nil
+        }
+        Some(_already_seeded) -> Nil
+      }
       let state = State(..state, root_id: Some(root_id), model: model)
-      run_round(state)
-      actor.continue(state)
+      actor.continue(run_round(state))
     }
     ApplyRemoteChanges(observations) ->
       case state.root_id {
         None -> actor.continue(state)
         Some(_root) -> {
           let model = list.fold(observations, state.model, apply_observation)
-          let state = State(..state, model: model)
-          run_round(state)
-          actor.continue(state)
+          actor.continue(run_round(State(..state, model: model)))
         }
       }
     SettleUpload(path, outcome) -> {
@@ -173,8 +191,7 @@ fn handle_command(
         Error(_reason) -> state
       }
       let state = forget_pending_upload(state, path)
-      run_round_if_seeded(state)
-      actor.continue(state)
+      actor.continue(run_round_if_seeded(state))
     }
     SettleTrash(file_id, outcome) -> {
       let state = case outcome {
@@ -182,20 +199,23 @@ fn handle_command(
         Error(_reason) -> state
       }
       let state = forget_pending_trash(state, file_id)
-      run_round_if_seeded(state)
-      actor.continue(state)
+      actor.continue(run_round_if_seeded(state))
     }
     ReconcileNow -> {
-      run_round_if_seeded(state)
-      actor.continue(state)
+      process.send_after(
+        state.self,
+        state.config.round_interval_ms,
+        ReconcileNow,
+      )
+      actor.continue(run_round_if_seeded(state))
     }
   }
 }
 
-fn run_round_if_seeded(state: State) -> Nil {
+fn run_round_if_seeded(state: State) -> State {
   case state.root_id {
     Some(_root) -> run_round(state)
-    None -> Nil
+    None -> state
   }
 }
 
@@ -213,7 +233,7 @@ fn apply_observation(
   }
 }
 
-fn run_round(state: State) -> Nil {
+fn run_round(state: State) -> State {
   let config = state.config
   let assert Some(root_id) = state.root_id
   let assert Ok(locals) = config.scan_local()
@@ -228,31 +248,132 @@ fn run_round(state: State) -> Nil {
     known
     |> list.map(fn(file) { #(file.path, file) })
     |> dict.from_list
+  let folder_ids_by_path =
+    remotes
+    |> list.filter(fn(remote) { remote.kind == Folder })
+    |> list.map(fn(remote) { #(remote.path, remote.file_id) })
+    |> dict.from_list
 
   let locals = hash_never_synced_twins(config, locals, remotes, known_by_path)
+  let locals_by_path =
+    locals
+    |> list.map(fn(local) { #(local.path, local) })
+    |> dict.from_list
 
   reconcile.reconcile_all(locals, remotes, known)
-  |> list.each(fn(decision) {
+  |> list.fold(state, fn(state, decision) {
     case decision {
-      decision.DownloadRemote(file_id, _path) ->
+      decision.DownloadRemote(file_id, _path) -> {
         case dict.get(remote_by_id, file_id) {
           Ok(remote) -> config.dispatch_download(remote)
           Error(Nil) -> Nil
         }
-      decision.DeleteLocal(path) ->
+        state
+      }
+      decision.DeleteLocal(path) -> {
         case dict.get(known_by_path, path) {
           Ok(file) -> config.dispatch_delete_local(file.file_id, path)
           Error(Nil) -> Nil
         }
-      decision.ForgetKnown(file_id) ->
+        state
+      }
+      decision.ForgetKnown(file_id) -> {
         process.send(config.state_owner, state_owner.ForgetKnown(file_id))
-      // Download-only phase: local-driven decisions wait for upload support.
-      decision.UploadLocal(_) -> Nil
-      decision.DeleteRemote(_) -> Nil
-      decision.Conflict(_, _, _) -> Nil
-      decision.Noop -> Nil
+        state
+      }
+      decision.UploadLocal(path) ->
+        dispatch_upload_once(
+          state,
+          path,
+          locals_by_path,
+          known_by_path,
+          folder_ids_by_path,
+          root_id,
+        )
+      decision.DeleteRemote(file_id) ->
+        case set.contains(state.pending_trashes, file_id) {
+          True -> state
+          False -> {
+            config.dispatch_trash_remote(file_id)
+            State(
+              ..state,
+              pending_trashes: set.insert(state.pending_trashes, file_id),
+            )
+          }
+        }
+      // Conflicts wait for the bidirectional phase's resolution policy.
+      decision.Conflict(_, _, _) -> state
+      decision.Noop -> state
     }
   })
+}
+
+fn dispatch_upload_once(
+  state: State,
+  path: String,
+  locals_by_path: Dict(String, LocalFile),
+  known_by_path: Dict(String, entry.KnownFile),
+  folder_ids_by_path: Dict(String, String),
+  root_id: String,
+) -> State {
+  let already_in_flight = set.contains(state.pending_uploads, path)
+  case already_in_flight, dict.get(locals_by_path, path) {
+    True, _ -> state
+    False, Error(Nil) -> state
+    False, Ok(local) -> {
+      let #(directory_segments, name) = split_file_name(path)
+      let #(anchor_parent_id, missing_folders) =
+        resolve_upload_anchor(directory_segments, folder_ids_by_path, root_id)
+      state.config.dispatch_upload(UploadPlan(
+        local: local,
+        name: name,
+        existing_file_id: case dict.get(known_by_path, path) {
+          Ok(known) -> Some(known.file_id)
+          Error(Nil) -> None
+        },
+        anchor_parent_id: anchor_parent_id,
+        missing_folders: missing_folders,
+      ))
+      State(..state, pending_uploads: set.insert(state.pending_uploads, path))
+    }
+  }
+}
+
+fn split_file_name(path: String) -> #(List(String), String) {
+  let segments = string.split(path, "/")
+  case list.reverse(segments) {
+    [name, ..reversed_directory] -> #(list.reverse(reversed_directory), name)
+    [] -> #([], path)
+  }
+}
+
+/// Find the deepest directory prefix that already exists as a remote folder;
+/// everything below it must be created, outermost first.
+fn resolve_upload_anchor(
+  directory_segments: List(String),
+  folder_ids_by_path: Dict(String, String),
+  root_id: String,
+) -> #(String, List(String)) {
+  case directory_segments {
+    [] -> #(root_id, [])
+    segments ->
+      case dict.get(folder_ids_by_path, string.join(segments, "/")) {
+        Ok(folder_id) -> #(folder_id, [])
+        Error(Nil) -> {
+          let #(kept, missing_tail) = split_off_deepest(segments)
+          let #(anchor, missing) =
+            resolve_upload_anchor(kept, folder_ids_by_path, root_id)
+          #(anchor, list.append(missing, [missing_tail]))
+        }
+      }
+  }
+}
+
+fn split_off_deepest(segments: List(String)) -> #(List(String), String) {
+  case list.reverse(segments) {
+    [deepest, ..reversed_kept] -> #(list.reverse(reversed_kept), deepest)
+    [] -> #([], "")
+  }
 }
 
 /// Turn the sighting model into placeable RemoteFiles: resolve paths from the

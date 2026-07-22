@@ -16,6 +16,9 @@ import support/fakes
 type Dispatch {
   DownloadDispatched(remote: entry.RemoteFile)
   DeleteLocalDispatched(file_id: String, path: String)
+  UploadDispatched(plan: reconciler.UploadPlan)
+  TrashDispatched(file_id: String)
+  LocalScanned
 }
 
 fn a_sighting(
@@ -48,11 +51,14 @@ fn a_folder_sighting(
   )
 }
 
-fn start_reconciler(
+const idle_round_interval = 600_000
+
+fn start_reconciler_with_interval(
   owner: Subject(state_owner.Command),
   dispatches: Subject(Dispatch),
   locals: List(entry.LocalFile),
   hash_outcome: Result(String, String),
+  round_interval_ms: Int,
 ) -> Subject(reconciler.Command) {
   let name = process.new_name(prefix: "reconciler_test")
   let assert Ok(_) =
@@ -66,12 +72,61 @@ fn start_reconciler(
         dispatch_delete_local: fn(file_id, path) {
           process.send(dispatches, DeleteLocalDispatched(file_id, path))
         },
-        scan_local: fn() { Ok(locals) },
+        dispatch_upload: fn(plan) {
+          process.send(dispatches, UploadDispatched(plan))
+        },
+        dispatch_trash_remote: fn(file_id) {
+          process.send(dispatches, TrashDispatched(file_id))
+        },
+        scan_local: fn() {
+          process.send(dispatches, LocalScanned)
+          Ok(locals)
+        },
         hash_local_file: fn(_path) { hash_outcome },
         native_policy: LinkFile,
+        round_interval_ms: round_interval_ms,
       ),
     )
   process.named_subject(name)
+}
+
+fn start_reconciler(
+  owner: Subject(state_owner.Command),
+  dispatches: Subject(Dispatch),
+  locals: List(entry.LocalFile),
+  hash_outcome: Result(String, String),
+) -> Subject(reconciler.Command) {
+  start_reconciler_with_interval(
+    owner,
+    dispatches,
+    locals,
+    hash_outcome,
+    idle_round_interval,
+  )
+}
+
+fn receive_transfers(
+  dispatches: Subject(Dispatch),
+  count: Int,
+) -> List(Dispatch) {
+  case count {
+    0 -> []
+    _ ->
+      case process.receive(dispatches, 1000) {
+        // Scan notifications are bookkeeping, not transfers.
+        Ok(LocalScanned) -> receive_transfers(dispatches, count)
+        Ok(dispatch) -> [dispatch, ..receive_transfers(dispatches, count - 1)]
+        Error(Nil) -> []
+      }
+  }
+}
+
+fn expect_no_transfers(dispatches: Subject(Dispatch)) -> Bool {
+  case process.receive(dispatches, 300) {
+    Ok(LocalScanned) -> expect_no_transfers(dispatches)
+    Ok(_) -> False
+    Error(Nil) -> True
+  }
 }
 
 pub fn seeding_downloads_the_whole_remote_test() {
@@ -87,10 +142,9 @@ pub fn seeding_downloads_the_whole_remote_test() {
     ]),
   )
 
-  let assert Ok(first) = process.receive(dispatches, 1000)
-  let assert Ok(second) = process.receive(dispatches, 1000)
   let downloads =
-    list.filter_map([first, second], fn(dispatch) {
+    receive_transfers(dispatches, 2)
+    |> list.filter_map(fn(dispatch) {
       case dispatch {
         DownloadDispatched(remote) ->
           Ok(#(remote.file_id, remote.path, remote.kind))
@@ -124,7 +178,7 @@ pub fn files_already_synced_are_left_alone_test() {
     reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
   )
 
-  assert process.receive(dispatches, 300) == Error(Nil)
+  assert expect_no_transfers(dispatches)
 }
 
 pub fn a_remote_removal_deletes_the_local_copy_test() {
@@ -151,8 +205,8 @@ pub fn a_remote_removal_deletes_the_local_copy_test() {
 
   process.send(sut, reconciler.ApplyRemoteChanges([ObservedRemoval("id-1")]))
 
-  assert process.receive(dispatches, 1000)
-    == Ok(DeleteLocalDispatched("id-1", "report.txt"))
+  assert receive_transfers(dispatches, 1)
+    == [DeleteLocalDispatched("id-1", "report.txt")]
 }
 
 pub fn a_trashed_file_counts_as_removed_test() {
@@ -181,8 +235,8 @@ pub fn a_trashed_file_counts_as_removed_test() {
     RemoteSighting(..a_sighting("id-1", "report.txt", "root"), trashed: True)
   process.send(sut, reconciler.ApplyRemoteChanges([ObservedFile(trashed)]))
 
-  assert process.receive(dispatches, 1000)
-    == Ok(DeleteLocalDispatched("id-1", "report.txt"))
+  assert receive_transfers(dispatches, 1)
+    == [DeleteLocalDispatched("id-1", "report.txt")]
 }
 
 pub fn identical_never_synced_twins_are_adopted_without_transfer_test() {
@@ -198,7 +252,7 @@ pub fn identical_never_synced_twins_are_adopted_without_transfer_test() {
     reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
   )
 
-  assert process.receive(dispatches, 300) == Error(Nil)
+  assert expect_no_transfers(dispatches)
 }
 
 pub fn native_docs_are_planned_as_link_files_test() {
@@ -215,21 +269,9 @@ pub fn native_docs_are_planned_as_link_files_test() {
 
   process.send(sut, reconciler.SeedMirror("root", [native]))
 
-  let assert Ok(DownloadDispatched(remote)) = process.receive(dispatches, 1000)
+  let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
   assert remote.path == "notes.desktop"
   assert remote.kind == GoogleNative
-}
-
-pub fn upload_side_decisions_are_ignored_in_download_only_test() {
-  let owner = fakes.start_ephemeral_state_owner()
-  let local_only =
-    LocalFile(path: "mine.txt", size: 1, mtime_seconds: 1, md5: Some("zzz"))
-  let dispatches = process.new_subject()
-  let sut = start_reconciler(owner, dispatches, [local_only], Error("unused"))
-
-  process.send(sut, reconciler.SeedMirror("root", []))
-
-  assert process.receive(dispatches, 300) == Error(Nil)
 }
 
 pub fn changes_arriving_before_the_seed_are_ignored_test() {
@@ -239,5 +281,192 @@ pub fn changes_arriving_before_the_seed_are_ignored_test() {
 
   process.send(sut, reconciler.ApplyRemoteChanges([ObservedRemoval("id-1")]))
 
-  assert process.receive(dispatches, 300) == Error(Nil)
+  assert expect_no_transfers(dispatches)
+}
+
+// --- Upload planning ----------------------------------------------------------
+
+pub fn a_new_local_file_is_planned_for_upload_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "docs/mine.txt", size: 3, mtime_seconds: 1, md5: Some("zzz"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_folder_sighting("id-docs", "docs", "root")]),
+  )
+
+  // The never-synced remote folder also gets materialised (bookkeeping);
+  // the upload plan is what this test is about.
+  let assert [plan] =
+    receive_transfers(dispatches, 2)
+    |> list.filter_map(fn(dispatch) {
+      case dispatch {
+        UploadDispatched(plan) -> Ok(plan)
+        _ -> Error(Nil)
+      }
+    })
+  assert plan.local == local
+  assert plan.name == "mine.txt"
+  assert plan.existing_file_id == None
+  // "docs" already exists remotely: it anchors the upload, nothing to create.
+  assert plan.anchor_parent_id == "id-docs"
+  assert plan.missing_folders == []
+}
+
+pub fn a_file_in_a_brand_new_directory_lists_missing_folders_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "novo/sub/mine.txt", size: 3, mtime_seconds: 1, md5: Some("z"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+
+  process.send(sut, reconciler.SeedMirror("root", []))
+
+  let assert [UploadDispatched(plan)] = receive_transfers(dispatches, 1)
+  assert plan.anchor_parent_id == "root"
+  assert plan.missing_folders == ["novo", "sub"]
+}
+
+pub fn a_modified_local_file_updates_in_place_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let known =
+    KnownFile(
+      file_id: "id-1",
+      path: "report.txt",
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: Some("aaa"),
+      size: 42,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )
+  process.send(owner, state_owner.PutKnown(known))
+  let edited =
+    LocalFile(path: "report.txt", size: 43, mtime_seconds: 2000, md5: None)
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [edited], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
+  )
+
+  let assert [UploadDispatched(plan)] = receive_transfers(dispatches, 1)
+  assert plan.existing_file_id == Some("id-1")
+}
+
+pub fn an_in_flight_upload_is_not_re_dispatched_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "mine.txt", size: 3, mtime_seconds: 1, md5: Some("zzz"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+  process.send(sut, reconciler.SeedMirror("root", []))
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+
+  process.send(sut, reconciler.ReconcileNow)
+
+  assert expect_no_transfers(dispatches)
+}
+
+pub fn a_failed_upload_is_re_dispatched_after_settling_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "mine.txt", size: 3, mtime_seconds: 1, md5: Some("zzz"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+  process.send(sut, reconciler.SeedMirror("root", []))
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+
+  process.send(sut, reconciler.SettleUpload("mine.txt", Error("boom")))
+
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+  Nil
+}
+
+pub fn a_settled_upload_stops_being_dispatched_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let local =
+    LocalFile(path: "mine.txt", size: 3, mtime_seconds: 1000, md5: Some("zzz"))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+  process.send(sut, reconciler.SeedMirror("root", []))
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+
+  // What the pool does on success: record the known state, then settle with
+  // the uploaded file's sighting.
+  process.send(
+    owner,
+    state_owner.PutKnown(KnownFile(
+      file_id: "id-up",
+      path: "mine.txt",
+      remote_modified_time: "2026-07-22T10:00:00Z",
+      md5: Some("zzz"),
+      size: 3,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )),
+  )
+  let uploaded =
+    RemoteSighting(
+      ..a_sighting("id-up", "mine.txt", "root"),
+      modified_time: "2026-07-22T10:00:00Z",
+      md5: Some("zzz"),
+      size: Some(3),
+    )
+  process.send(sut, reconciler.SettleUpload("mine.txt", Ok(uploaded)))
+
+  assert expect_no_transfers(dispatches)
+}
+
+// --- Trash planning -----------------------------------------------------------
+
+pub fn a_locally_deleted_file_is_planned_for_trash_once_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let known =
+    KnownFile(
+      file_id: "id-1",
+      path: "gone.txt",
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: Some("aaa"),
+      size: 42,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )
+  process.send(owner, state_owner.PutKnown(known))
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "gone.txt", "root")]),
+  )
+
+  assert receive_transfers(dispatches, 1) == [TrashDispatched("id-1")]
+  process.send(sut, reconciler.ReconcileNow)
+  assert expect_no_transfers(dispatches)
+
+  // The pool forgets the known state on success, then settles.
+  process.send(owner, state_owner.ForgetKnown("id-1"))
+  process.send(sut, reconciler.SettleTrash("id-1", Ok(Nil)))
+  assert expect_no_transfers(dispatches)
+}
+
+// --- Periodic rounds ----------------------------------------------------------
+
+pub fn rounds_repeat_on_the_configured_interval_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut =
+    start_reconciler_with_interval(owner, dispatches, [], Error("unused"), 25)
+
+  process.send(sut, reconciler.SeedMirror("root", []))
+
+  // One scan per round: the seed's own round plus at least two timer-driven.
+  let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
+  let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
+  let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
+  Nil
 }

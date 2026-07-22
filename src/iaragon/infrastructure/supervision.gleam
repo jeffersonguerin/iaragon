@@ -30,6 +30,8 @@ pub type Daemon {
 
 const poll_interval_ms = 30_000
 
+const round_interval_ms = 30_000
+
 /// Start the whole tree. The composition root injects the persistence store,
 /// the (authenticated) Drive port, the mirror location and the streaming
 /// download. The pipeline is wired here: poller → reconciler →
@@ -103,9 +105,19 @@ pub fn start_daemon(
           transfer_pool.EnqueueDeleteLocal(file_id, path),
         )
       },
+      dispatch_upload: fn(plan) {
+        process.send(transfer_pool_subject, transfer_pool.EnqueueUpload(plan))
+      },
+      dispatch_trash_remote: fn(file_id) {
+        process.send(
+          transfer_pool_subject,
+          transfer_pool.EnqueueTrashRemote(file_id),
+        )
+      },
       scan_local: fn() { local_scan.scan_mirror(mirror_root) },
       hash_local_file: fn(path) { hashing.hash_mirror_file(mirror_root, path) },
       native_policy: native_policy,
+      round_interval_ms: round_interval_ms,
     )
 
   static_supervisor.new(static_supervisor.OneForOne)
