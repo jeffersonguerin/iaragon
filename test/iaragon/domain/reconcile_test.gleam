@@ -1,8 +1,8 @@
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
-  BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote, EditEdit,
-  ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop, RemoteEditLocalDelete,
-  UploadLocal,
+  AdoptKnown, BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote,
+  EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop,
+  RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{
   Blob, GoogleNative, KnownFile, LocalFile, RemoteFile,
@@ -199,9 +199,11 @@ pub fn a_remote_move_with_a_content_change_moves_first_test() {
 
 // --- Both created without a last known state ---------------------------------
 
-pub fn both_created_with_identical_content_noops_test() {
-  // First run over a pre-populated mirror: adopt silently, no transfer.
-  assert reconcile.reconcile(Some(a_local()), Some(a_remote()), None) == Noop
+pub fn both_created_with_identical_content_is_adopted_test() {
+  // First run over a pre-populated mirror: no transfer, but the twin link
+  // must be RECORDED — otherwise every round re-hashes the pair.
+  assert reconcile.reconcile(Some(a_local()), Some(a_remote()), None)
+    == AdoptKnown("id-1", "docs/report.txt")
 }
 
 pub fn both_created_with_different_content_conflicts_test() {

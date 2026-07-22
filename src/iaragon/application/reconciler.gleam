@@ -323,9 +323,41 @@ fn run_round(state: State) -> State {
         resolve_conflict(state, path, file_id, kind, remote_by_id)
       // Dispatch wired in the move round (transfer pool support first).
       decision.MoveLocal(_file_id, _from, _to) -> state
+      decision.AdoptKnown(file_id, path) -> {
+        adopt_twin(config, file_id, path, remote_by_id, locals_by_path)
+        state
+      }
       decision.Noop -> state
     }
   })
+}
+
+/// Record a proven-identical twin pair in the sync index without any
+/// transfer: the local file's cheap metadata plus the remote identity make
+/// the KnownFile snapshot.
+fn adopt_twin(
+  config: ReconcilerConfig,
+  file_id: String,
+  path: String,
+  remote_by_id: Dict(String, RemoteFile),
+  locals_by_path: Dict(String, LocalFile),
+) -> Nil {
+  case dict.get(remote_by_id, file_id), dict.get(locals_by_path, path) {
+    Ok(remote), Ok(local) ->
+      process.send(
+        config.state_owner,
+        state_owner.PutKnown(entry.KnownFile(
+          file_id: file_id,
+          path: path,
+          remote_modified_time: remote.modified_time,
+          md5: remote.md5,
+          size: local.size,
+          local_mtime_seconds: local.mtime_seconds,
+          kind: remote.kind,
+        )),
+      )
+    _, _ -> Nil
+  }
 }
 
 /// The chosen policies: edit-edit (and divergent both-created) becomes a

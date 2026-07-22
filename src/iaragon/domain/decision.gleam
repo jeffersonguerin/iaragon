@@ -21,5 +21,8 @@ pub type SyncDecision {
   /// Both sides are gone: drop the stale entry from the sync index so the
   /// state table does not leak.
   ForgetKnown(file_id: String)
+  /// Never-synced twins with provably identical content: record the link,
+  /// transfer nothing. Without the record every round re-hashes the pair.
+  AdoptKnown(file_id: String, path: String)
   Noop
 }

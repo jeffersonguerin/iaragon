@@ -10,9 +10,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set
 import iaragon/domain/decision.{
-  type SyncDecision, BothCreated, Conflict, DeleteLocal, DeleteRemote,
-  DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, Noop,
-  RemoteEditLocalDelete, UploadLocal,
+  type SyncDecision, AdoptKnown, BothCreated, Conflict, DeleteLocal,
+  DeleteRemote, DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete,
+  MoveLocal, Noop, RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
 
@@ -44,7 +44,7 @@ pub fn reconcile(
         entry.GoogleNative -> DownloadRemote(r.file_id, r.path)
         entry.Blob | entry.Folder | entry.Shortcut(_) ->
           case share_same_content(l, r) {
-            True -> Noop
+            True -> AdoptKnown(r.file_id, r.path)
             False -> Conflict(l.path, r.file_id, BothCreated)
           }
       }

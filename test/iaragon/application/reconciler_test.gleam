@@ -258,6 +258,14 @@ pub fn identical_never_synced_twins_are_adopted_without_transfer_test() {
   )
 
   assert expect_no_transfers(dispatches)
+  // Adoption is bookkept: the twin link lands in the state owner, so later
+  // rounds stop re-hashing the pair.
+  let assert Some(known) =
+    process.call(owner, 500, state_owner.GetKnown("id-1", _))
+  assert known.path == "report.txt"
+  assert known.md5 == Some("aaa")
+  assert known.size == 42
+  assert known.local_mtime_seconds == 1000
 }
 
 pub fn native_docs_are_planned_as_link_files_test() {
