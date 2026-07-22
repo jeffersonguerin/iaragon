@@ -74,25 +74,25 @@ fn reconcile_in_place(
   k: KnownFile,
 ) -> SyncDecision {
   case r.kind {
-        // Download-only by policy: a local edit of a native is never
-        // uploaded (it would destroy the source document); the mirror
-        // self-heals by re-downloading whenever either side moved.
-        entry.GoogleNative ->
-          case detect_local_change(l, k), detect_remote_change(r, k) {
-            False, False -> Noop
-            _, _ -> DownloadRemote(r.file_id, k.path)
+    // Download-only by policy: a local edit of a native is never
+    // uploaded (it would destroy the source document); the mirror
+    // self-heals by re-downloading whenever either side moved.
+    entry.GoogleNative ->
+      case detect_local_change(l, k), detect_remote_change(r, k) {
+        False, False -> Noop
+        _, _ -> DownloadRemote(r.file_id, k.path)
+      }
+    entry.Blob | entry.Folder | entry.Shortcut(_) ->
+      case detect_local_change(l, k), detect_remote_change(r, k) {
+        False, False -> Noop
+        True, False -> UploadLocal(l.path)
+        False, True -> DownloadRemote(r.file_id, k.path)
+        True, True ->
+          case share_same_content(l, r) {
+            True -> Noop
+            False -> Conflict(k.path, k.file_id, EditEdit)
           }
-        entry.Blob | entry.Folder | entry.Shortcut(_) ->
-          case detect_local_change(l, k), detect_remote_change(r, k) {
-            False, False -> Noop
-            True, False -> UploadLocal(l.path)
-            False, True -> DownloadRemote(r.file_id, k.path)
-            True, True ->
-              case share_same_content(l, r) {
-                True -> Noop
-                False -> Conflict(k.path, k.file_id, EditEdit)
-              }
-          }
+      }
   }
 }
 

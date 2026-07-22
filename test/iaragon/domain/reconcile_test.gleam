@@ -178,7 +178,8 @@ pub fn trashed_remote_of_unknown_file_noops_test() {
 pub fn a_remote_rename_moves_the_local_copy_test() {
   // Same content, new resolved path: the mirror must move the file, not
   // ignore it (and certainly not re-download it).
-  let renamed = RemoteFile(..a_remote(), name: "renamed.txt", path: "docs/renamed.txt")
+  let renamed =
+    RemoteFile(..a_remote(), name: "renamed.txt", path: "docs/renamed.txt")
   assert reconcile.reconcile(Some(a_local()), Some(renamed), Some(a_known()))
     == MoveLocal("id-1", "docs/report.txt", "docs/renamed.txt")
 }

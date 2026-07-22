@@ -173,7 +173,8 @@ fn run_move_local(
       |> describe_error,
     )
     case source_exists(source), destination_exists(destination) {
-      True, False -> simplifile.rename(at: source, to: destination) |> describe_error
+      True, False ->
+        simplifile.rename(at: source, to: destination) |> describe_error
       // Already carried to its destination (e.g. by a parent folder rename).
       False, True -> Ok(Nil)
       False, False -> Error("neither source nor destination exists")
@@ -183,8 +184,7 @@ fn run_move_local(
     }
   }
   case moved {
-    Ok(Nil) ->
-      process.send(config.state_owner, state_owner.PutKnown(updated))
+    Ok(Nil) -> process.send(config.state_owner, state_owner.PutKnown(updated))
     Error(_reason) -> Nil
   }
 }

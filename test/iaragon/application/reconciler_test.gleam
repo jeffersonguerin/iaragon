@@ -308,7 +308,10 @@ pub fn changes_arriving_before_the_seed_request_a_reseed_test() {
 
 pub fn a_remote_rename_dispatches_a_local_move_test() {
   let owner = fakes.start_ephemeral_state_owner()
-  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
   let local =
     LocalFile(path: "report.txt", size: 42, mtime_seconds: 1000, md5: None)
   let dispatches = process.new_subject()

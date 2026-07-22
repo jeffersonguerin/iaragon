@@ -203,18 +203,28 @@ Estado do daemon: `~/.local/share/iaragon/state.db` (SQLite). `gleam run`
 sobe a árvore e o main envia o primeiro `Poll` — sem credenciais, o poller
 só fica em retry (a porta Drive carrega tudo lazy).
 
-Limitações conhecidas (para as próximas sessões): modelo remoto do reconciler
-é só memória (crash do reconciler = mudanças ignoradas até novo seed/restart);
-adoção de gêmeos idênticos não grava `PutKnown` (re-hash a cada rodada — falta
-uma decisão de bookkeeping no domínio); shortcuts ficam fora do espelho
-(precisam de `shortcutDetails` na projeção); export de nativos
-(ExportOffice/ExportOdf) ainda materializa como link.
+Fase correção/robustez (sessão 7): **renames remotos viram `MoveLocal`**
+(bug corrigido: rename de arquivo sincado era silenciosamente ignorado — o
+reconcile só comparava conteúdo, nunca path; agora path divergente decide
+move ANTES da detecção de conteúdo; edit simultâneo resolve na rodada
+seguinte); `EnqueueMoveLocal` idempotente no pool (pastas movem por rename
+carregando filhos; filho já carregado = só bookkeeping; PutKnown SÓ no
+sucesso); **`AdoptKnown`** grava gêmeos idênticos no índice (fim do re-hash
+por rodada); **auto-reseed** — reconciler sem modelo (reiniciado) que recebe
+mudanças pede `Reseed` ao poller; poller mantém CADEIA ÚNICA de polling
+(timer pendente cancelado em Poll fora de banda — senão reseed duplicaria o
+polling para sempre).
 
-**Próximas sessões**: renames como renames (hoje viram delete+create —
-funcional, mas re-transfere), export real de nativos
-(ExportOffice/ExportOdf), shortcutDetails, watcher inotify (filespy) como
-alternativa ao polling do polly, overlays de file manager, e as limitações
-acima (modelo remoto só em memória; adoção de gêmeos sem bookkeeping).
+Limitações conhecidas: renames LOCAIS ainda viram trash+re-upload
+(convergem, mas re-transferem e perdem o file_id); shortcuts fora do
+espelho (falta `shortcutDetails` na projeção); export de nativos
+(ExportOffice/ExportOdf) ainda materializa como link; pasta antiga pode
+sobrar vazia se o destino do move já existia (rodadas seguintes não a
+removem).
+
+**Próximas sessões**: renames locais como renames (files.update de
+name/parents), export real de nativos, shortcutDetails, watcher inotify
+(filespy) como alternativa ao polling do polly, overlays de file manager.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

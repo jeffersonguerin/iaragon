@@ -396,10 +396,15 @@ fn a_known_at(file_id: String, path: String) -> entry.KnownFile {
 pub fn a_move_relocates_the_file_and_updates_known_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let root = scratch_dir <> "/move"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root)
-  let assert Ok(Nil) = simplifile.write(to: root <> "/old.txt", contents: "bytes")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/old.txt", contents: "bytes")
   let pool =
-    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
 
   process.send(
     pool,
@@ -419,13 +424,17 @@ pub fn a_move_relocates_the_file_and_updates_known_test() {
 pub fn an_already_done_move_still_records_known_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let root = scratch_dir <> "/move-done"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root)
   // The parent folder was renamed as a whole earlier: the file is already at
   // its destination and the source is gone.
   let assert Ok(Nil) =
     simplifile.write(to: root <> "/renamed.txt", contents: "bytes")
   let pool =
-    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
 
   process.send(
     pool,
@@ -442,11 +451,15 @@ pub fn an_already_done_move_still_records_known_test() {
 pub fn a_folder_move_renames_the_directory_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let root = scratch_dir <> "/move-folder"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root <> "/old-dir")
   let assert Ok(Nil) =
     simplifile.write(to: root <> "/old-dir/child.txt", contents: "child")
   let pool =
-    start_pool_with(a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }))
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
   let folder =
     entry.KnownFile(..a_known_at("id-f", "new-dir"), md5: None, kind: Folder)
 
@@ -470,6 +483,8 @@ pub fn a_conflict_moves_local_aside_and_downloads_the_remote_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let events = process.new_subject()
   let root = scratch_dir <> "/conflict"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root)
   let assert Ok(Nil) =
     simplifile.write(to: root <> "/report.txt", contents: "local edit")
@@ -507,6 +522,8 @@ pub fn a_taken_copy_name_gets_a_numeric_variant_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let events = process.new_subject()
   let root = scratch_dir <> "/conflict-variant"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root)
   let assert Ok(Nil) =
     simplifile.write(to: root <> "/report.txt", contents: "local edit")
@@ -545,6 +562,8 @@ pub fn a_failing_conflict_download_settles_the_failure_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let events = process.new_subject()
   let root = scratch_dir <> "/conflict-fail"
+  // Wipe leftovers from earlier runs: these tests assert exact paths.
+  let _ = simplifile.delete(root)
   let assert Ok(Nil) = simplifile.create_directory_all(root)
   let assert Ok(Nil) =
     simplifile.write(to: root <> "/report.txt", contents: "local edit")
