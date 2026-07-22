@@ -4,6 +4,7 @@
 
 import filepath
 import gleam/result
+import gleam/uri
 import simplifile
 
 pub type DownloadError {
@@ -13,6 +14,16 @@ pub type DownloadError {
 
 pub fn build_media_url(file_id: String) -> String {
   "https://www.googleapis.com/drive/v3/files/" <> file_id <> "?alt=media"
+}
+
+/// Native-doc export (`files/{id}/export`). Same streaming download as
+/// `alt=media` behind it — only the URL differs. Export MIMEs contain `/`,
+/// so the query value is percent-encoded.
+pub fn build_export_url(file_id: String, export_mime: String) -> String {
+  "https://www.googleapis.com/drive/v3/files/"
+  <> file_id
+  <> "/export?mimeType="
+  <> uri.percent_encode(export_mime)
 }
 
 pub fn fetch_file_to_disk(

@@ -92,6 +92,7 @@ pub fn start_daemon(
       create_remote_folder: transfers.create_remote_folder,
       trash_remote: transfers.trash_remote,
       rename_remote: transfers.rename_remote,
+      export_to_disk: transfers.export_to_disk,
       settle_upload: fn(path, outcome) {
         process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
       },

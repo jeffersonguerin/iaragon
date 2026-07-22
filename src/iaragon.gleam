@@ -105,6 +105,16 @@ fn build_transfer_ops(config_dir: String) -> transfer_pool.DriveTransferOps {
       )
       |> result.map_error(string.inspect)
     },
+    export_to_disk: fn(file_id, export_mime, destination) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      download.fetch_file_to_disk(
+        url: download.build_export_url(file_id, export_mime),
+        access_token: access_token,
+        destination: destination,
+        timeout_ms: download_timeout_ms,
+      )
+      |> result.map_error(string.inspect)
+    },
   )
 }
 

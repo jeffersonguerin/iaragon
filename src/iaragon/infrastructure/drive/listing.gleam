@@ -55,7 +55,7 @@ fn fetch_remaining_files(
     #(
       "fields",
       "nextPageToken,files(id,name,mimeType,parents,modifiedTime,size,"
-        <> "md5Checksum,trashed)",
+        <> "md5Checksum,trashed,shortcutDetails(targetId))",
     ),
   ]
   let query = case page_token {

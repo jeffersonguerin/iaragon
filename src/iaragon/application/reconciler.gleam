@@ -28,6 +28,7 @@ import iaragon/domain/entry.{
   type LocalFile, type NativeDocPolicy, type RemoteFile, Blob, Folder,
   GoogleNative, LocalFile, RemoteFile,
 }
+import iaragon/domain/native_docs
 import iaragon/domain/paths
 import iaragon/domain/reconcile
 
@@ -43,6 +44,8 @@ pub type RemoteSighting {
     size: Option(Int),
     md5: Option(String),
     trashed: Bool,
+    /// Only shortcuts carry one: the file the shortcut points at.
+    shortcut_target_id: Option(String),
   )
 }
 
@@ -580,19 +583,18 @@ fn split_off_deepest(segments: List(String)) -> #(List(String), String) {
 }
 
 /// Turn the sighting model into placeable RemoteFiles: resolve paths from the
-/// parent tree and give materialised natives their link-file suffix.
+/// parent tree and give materialised natives their extension — the export's
+/// own (docx/odt/…) under an export policy, `.desktop` for links.
 fn plan_remote_files(
   model: Dict(String, RemoteSighting),
   root_id: String,
-  _policy: NativeDocPolicy,
+  policy: NativeDocPolicy,
 ) -> List(RemoteFile) {
   let sightings = dict.values(model)
   let nodes =
     sightings
     |> list.filter_map(fn(sighting) {
-      case classify_mime(sighting.mime_type) {
-        // Shortcuts need a shortcutDetails fetch to be materialised; they
-        // are excluded from the mirror for now.
+      case classify_sighting(sighting) {
         None -> Error(Nil)
         Some(kind) ->
           Ok(paths.RemoteNode(
@@ -606,15 +608,12 @@ fn plan_remote_files(
   let resolved = paths.resolve_paths(nodes, root_id)
 
   list.filter_map(sightings, fn(sighting) {
-    case
-      classify_mime(sighting.mime_type),
-      dict.get(resolved, sighting.file_id)
-    {
+    case classify_sighting(sighting), dict.get(resolved, sighting.file_id) {
       Some(kind), Ok(path) ->
         Ok(RemoteFile(
           file_id: sighting.file_id,
           name: sighting.name,
-          path: materialized_path(path, kind),
+          path: materialized_path(path, kind, sighting.mime_type, policy),
           mime_type: sighting.mime_type,
           parent_id: sighting.parent_id,
           modified_time: sighting.modified_time,
@@ -628,20 +627,35 @@ fn plan_remote_files(
   })
 }
 
-fn materialized_path(path: String, kind: entry.FileKind) -> String {
+fn materialized_path(
+  path: String,
+  kind: entry.FileKind,
+  mime_type: String,
+  policy: NativeDocPolicy,
+) -> String {
   case kind {
-    // Every native policy materialises as a link for now; exports land with
-    // the upload-phase FFI.
-    GoogleNative -> path <> ".desktop"
-    _ -> path
+    GoogleNative ->
+      case native_docs.choose_materialisation(mime_type, policy) {
+        native_docs.WriteLinkFile -> path <> ".desktop"
+        native_docs.ExportDocument(_export_mime, extension) ->
+          path <> "." <> extension
+      }
+    entry.Shortcut(_) -> path <> ".desktop"
+    Folder | Blob -> path
   }
 }
 
-fn classify_mime(mime_type: String) -> Option(entry.FileKind) {
-  case mime_type {
+fn classify_sighting(sighting: RemoteSighting) -> Option(entry.FileKind) {
+  case sighting.mime_type {
     "application/vnd.google-apps.folder" -> Some(Folder)
-    "application/vnd.google-apps.shortcut" -> None
-    _ ->
+    "application/vnd.google-apps.shortcut" ->
+      // A shortcut without its target (projection gap upstream, or a target
+      // the account cannot see) cannot be materialised: keep it out.
+      case sighting.shortcut_target_id {
+        Some(target_id) -> Some(entry.Shortcut(target_id))
+        None -> None
+      }
+    mime_type ->
       case string.starts_with(mime_type, "application/vnd.google-apps.") {
         True -> Some(GoogleNative)
         False -> Some(Blob)

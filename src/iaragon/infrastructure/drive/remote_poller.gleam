@@ -198,6 +198,7 @@ pub fn translate_file(file: ChangedFile) -> RemoteSighting {
     modified_time: file.modified_time,
     size: file.size,
     md5: file.md5,
+    shortcut_target_id: file.shortcut_target_id,
     trashed: file.trashed,
   )
 }

@@ -48,7 +48,12 @@ const a_middle_page = "{\"changes\":["
   <> "{\"fileId\":\"id-3\",\"removed\":false,\"file\":{\"id\":\"id-3\","
   <> "\"name\":\"notes\",\"mimeType\":\"application/vnd.google-apps.document\","
   <> "\"parents\":[\"p-1\"],\"modifiedTime\":\"2026-07-02T09:00:00Z\","
-  <> "\"trashed\":true}}"
+  <> "\"trashed\":true}},"
+  <> "{\"fileId\":\"id-4\",\"removed\":false,\"file\":{\"id\":\"id-4\","
+  <> "\"name\":\"link to report\","
+  <> "\"mimeType\":\"application/vnd.google-apps.shortcut\","
+  <> "\"parents\":[\"p-1\"],\"modifiedTime\":\"2026-07-03T08:00:00Z\","
+  <> "\"shortcutDetails\":{\"targetId\":\"id-1\"},\"trashed\":false}}"
   <> "],\"nextPageToken\":\"next-1\"}"
 
 pub fn a_middle_page_parses_changes_and_next_token_test() {
@@ -65,6 +70,7 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
       size: Some(42),
       md5: Some("aaa"),
       trashed: False,
+      shortcut_target_id: None,
     )
   let expected_native =
     ChangedFile(
@@ -76,6 +82,19 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
       size: None,
       md5: None,
       trashed: True,
+      shortcut_target_id: None,
+    )
+  let expected_shortcut =
+    ChangedFile(
+      file_id: "id-4",
+      name: "link to report",
+      mime_type: "application/vnd.google-apps.shortcut",
+      parent_id: Some("p-1"),
+      modified_time: "2026-07-03T08:00:00Z",
+      size: None,
+      md5: None,
+      trashed: False,
+      shortcut_target_id: Some("id-1"),
     )
   assert changes.fetch_changes_page(
       send,
@@ -87,6 +106,7 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
         Changed(expected_blob),
         Removed("id-2"),
         Changed(expected_native),
+        Changed(expected_shortcut),
       ],
       outcome: NextPage("next-1"),
     ))
@@ -100,6 +120,9 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
   // Defaults are undocumented; the daemon must pin these explicitly.
   assert list.key_find(params, "includeRemoved") == Ok("true")
   assert list.key_find(params, "restrictToMyDrive") == Ok("true")
+  // The projection must ask for everything the parser reads.
+  let assert Ok(fields) = list.key_find(params, "fields")
+  assert string.contains(fields, "shortcutDetails(targetId)")
 }
 
 pub fn the_final_page_carries_the_new_start_token_test() {

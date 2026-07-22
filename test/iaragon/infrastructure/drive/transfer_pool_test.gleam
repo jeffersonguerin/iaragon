@@ -55,6 +55,7 @@ fn an_uploaded_file(file_id: String, name: String) -> changes.ChangedFile {
     size: Some(3),
     md5: Some("m-up"),
     trashed: False,
+    shortcut_target_id: None,
   )
 }
 
@@ -75,6 +76,9 @@ fn a_pool_config(
     trash_remote: fn(_file_id) { panic as "no trash expected in this test" },
     rename_remote: fn(_file_id, _new_name, _add, _remove) {
       panic as "no remote rename expected in this test"
+    },
+    export_to_disk: fn(_file_id, _export_mime, _destination) {
+      panic as "no export expected in this test"
     },
     settle_upload: fn(_path, _outcome) { Nil },
     settle_trash: fn(_file_id, _outcome) { Nil },
@@ -172,6 +176,73 @@ pub fn a_native_doc_becomes_a_link_file_test() {
   assert string.contains(contents, "[Desktop Entry]")
   let assert Some(known) = known_of(owner, "id-doc")
   assert known.kind == GoogleNative
+}
+
+type ExportEvent {
+  ExportCalled(file_id: String, export_mime: String)
+}
+
+pub fn a_native_doc_is_exported_under_the_office_policy_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/native-export"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      native_policy: entry.ExportOffice,
+      export_to_disk: fn(file_id, export_mime, destination) {
+        process.send(events, ExportCalled(file_id, export_mime))
+        let assert Ok(Nil) =
+          simplifile.write(to: destination, contents: "exported bytes")
+        Ok(Nil)
+      },
+    )
+  let pool = start_pool_with(config)
+  // The reconciler already decided the export extension on the path.
+  let native =
+    RemoteFile(
+      ..a_remote("id-doc", "notes.docx"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+      kind: GoogleNative,
+    )
+
+  process.send(pool, transfer_pool.EnqueueDownload(native))
+
+  let assert Ok(ExportCalled("id-doc", export_mime)) =
+    process.receive(events, 1000)
+  assert export_mime
+    == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-doc") != None })
+  assert simplifile.read(root <> "/notes.docx") == Ok("exported bytes")
+  let assert Some(known) = known_of(owner, "id-doc")
+  assert known.kind == GoogleNative
+}
+
+pub fn a_native_without_document_export_stays_a_link_under_export_policy_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/native-export-link"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      native_policy: entry.ExportOffice,
+    )
+  let pool = start_pool_with(config)
+  let drawing =
+    RemoteFile(
+      ..a_remote("id-draw", "sketch.desktop"),
+      mime_type: "application/vnd.google-apps.drawing",
+      size: None,
+      md5: None,
+      kind: GoogleNative,
+    )
+
+  process.send(pool, transfer_pool.EnqueueDownload(drawing))
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-draw") != None })
+  let assert Ok(contents) = simplifile.read(root <> "/sketch.desktop")
+  assert string.contains(contents, "https://drive.google.com/open?id=id-draw")
 }
 
 pub fn a_shortcut_links_to_its_target_test() {

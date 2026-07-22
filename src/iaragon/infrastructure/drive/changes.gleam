@@ -42,6 +42,8 @@ pub type ChangedFile {
     size: Option(Int),
     md5: Option(String),
     trashed: Bool,
+    /// Only shortcuts carry one: the file the shortcut points at.
+    shortcut_target_id: Option(String),
   )
 }
 
@@ -91,7 +93,8 @@ pub fn fetch_changes_page(
       #(
         "fields",
         "newStartPageToken,nextPageToken,changes(fileId,removed,"
-          <> "file(id,name,mimeType,parents,modifiedTime,size,md5Checksum,trashed))",
+          <> "file(id,name,mimeType,parents,modifiedTime,size,md5Checksum,"
+          <> "trashed,shortcutDetails(targetId)))",
       ),
     ])
   use body <- result.try(fetch_ok_body(send, request))
@@ -208,6 +211,14 @@ pub fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
     decode.optional(decode.string),
   )
   use trashed <- decode.optional_field("trashed", False, decode.bool)
+  use shortcut_target_id <- decode.optional_field(
+    "shortcutDetails",
+    None,
+    decode.optional({
+      use target_id <- decode.field("targetId", decode.string)
+      decode.success(target_id)
+    }),
+  )
   decode.success(ChangedFile(
     file_id:,
     name:,
@@ -218,5 +229,6 @@ pub fn changed_file_decoder() -> decode.Decoder(ChangedFile) {
       |> option.then(fn(text) { option.from_result(int.parse(text)) }),
     md5:,
     trashed:,
+    shortcut_target_id:,
   ))
 }

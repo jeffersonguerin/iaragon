@@ -93,3 +93,14 @@ pub fn media_urls_point_at_the_files_endpoint_test() {
   assert download.build_media_url("id-42")
     == "https://www.googleapis.com/drive/v3/files/id-42?alt=media"
 }
+
+// Export MIME types contain a `/` (and `+` in some formats), so the query
+// value must be percent-encoded.
+pub fn the_export_url_carries_the_encoded_export_mime_test() {
+  assert download.build_export_url(
+      "id-9",
+      "application/vnd.oasis.opendocument.text",
+    )
+    == "https://www.googleapis.com/drive/v3/files/id-9/export"
+    <> "?mimeType=application%2Fvnd.oasis.opendocument.text"
+}

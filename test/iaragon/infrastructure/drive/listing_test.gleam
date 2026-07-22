@@ -76,6 +76,9 @@ pub fn listing_walks_every_page_test() {
   assert list.key_find(params, "corpora") == Ok("user")
   assert list.key_find(params, "spaces") == Ok("drive")
   assert list.key_find(params, "pageSize") == Ok("1000")
+  // The projection must ask for everything the parser reads.
+  let assert Ok(fields) = list.key_find(params, "fields")
+  assert string.contains(fields, "shortcutDetails(targetId)")
 }
 
 pub fn a_refused_listing_reports_status_test() {

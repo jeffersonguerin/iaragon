@@ -21,6 +21,7 @@ fn a_sighting(file_id: String) -> reconciler.RemoteSighting {
     size: Some(42),
     md5: Some("aaa"),
     trashed: False,
+    shortcut_target_id: option.None,
   )
 }
 
@@ -108,6 +109,7 @@ pub fn changed_files_are_translated_into_observations_test() {
       size: Some(42),
       md5: Some("aaa"),
       trashed: False,
+      shortcut_target_id: option.None,
     )
   let port =
     DrivePort(

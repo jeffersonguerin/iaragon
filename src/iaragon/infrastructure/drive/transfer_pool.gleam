@@ -1,7 +1,8 @@
 //// Executes the reconciler's transfer decisions against the local mirror
 //// and Drive. Downloads: blobs (streamed via the injected fetch), folders,
-//// Google-native and shortcut materialisation as .desktop links, local
-//// deletions. Uploads: resumable pushes (create or update-in-place), remote
+//// Google-native materialisation (a `.desktop` link, or a real export under
+//// an export policy), shortcuts as links to their target, local deletions.
+//// Uploads: resumable pushes (create or update-in-place), remote
 //// folder creation for paths that do not exist on Drive yet (cached, so
 //// sibling uploads never create the same folder twice), and trashing.
 ////
@@ -31,6 +32,7 @@ import iaragon/domain/entry.{
   type NativeDocPolicy, type RemoteFile, Blob, Folder, GoogleNative, KnownFile,
   Shortcut,
 }
+import iaragon/domain/native_docs
 import iaragon/domain/paths
 import iaragon/infrastructure/drive/changes.{type ChangedFile}
 import iaragon/infrastructure/drive/remote_poller
@@ -73,6 +75,9 @@ pub type DriveTransferOps {
     trash_remote: fn(String) -> Result(Nil, String),
     rename_remote: fn(String, String, String, String) ->
       Result(ChangedFile, String),
+    /// (file_id, export mime, absolute destination) — native-doc export,
+    /// streamed to disk like a blob download.
+    export_to_disk: fn(String, String, String) -> Result(Nil, String),
   )
 }
 
@@ -90,6 +95,8 @@ pub type TransferConfig {
     /// (file_id, new_name, add_parent_id, remove_parent_id).
     rename_remote: fn(String, String, String, String) ->
       Result(ChangedFile, String),
+    /// (file_id, export mime, absolute destination) — native-doc export.
+    export_to_disk: fn(String, String, String) -> Result(Nil, String),
     /// Outcome feedback into the reconciler (path / file_id keyed).
     settle_upload: fn(String, Result(RemoteSighting, String)) -> Nil,
     settle_trash: fn(String, Result(Nil, String)) -> Nil,
@@ -393,10 +400,18 @@ fn materialize(
   case remote.kind {
     Folder -> simplifile.create_directory_all(destination) |> describe_error
     Blob -> config.fetch_to_disk(remote.file_id, destination)
-    // Export policies still materialise as links for now: exports land
-    // together with the rest of the native-doc work. A link is safe — never
-    // lossy, never overwritten by accident.
-    GoogleNative -> write_link_file(destination, remote.name, remote.file_id)
+    GoogleNative ->
+      case
+        native_docs.choose_materialisation(
+          remote.mime_type,
+          config.native_policy,
+        )
+      {
+        native_docs.WriteLinkFile ->
+          write_link_file(destination, remote.name, remote.file_id)
+        native_docs.ExportDocument(export_mime, _extension) ->
+          config.export_to_disk(remote.file_id, export_mime, destination)
+      }
     Shortcut(target_id) -> write_link_file(destination, remote.name, target_id)
   }
 }

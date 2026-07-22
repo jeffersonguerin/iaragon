@@ -39,6 +39,7 @@ fn a_sighting(
     size: Some(42),
     md5: Some("aaa"),
     trashed: False,
+    shortcut_target_id: None,
   )
 }
 
@@ -63,6 +64,7 @@ fn start_reconciler_with_interval(
   locals: List(entry.LocalFile),
   hash_outcome: Result(String, String),
   round_interval_ms: Int,
+  native_policy: entry.NativeDocPolicy,
 ) -> Subject(reconciler.Command) {
   let name = process.new_name(prefix: "reconciler_test")
   let assert Ok(_) =
@@ -97,7 +99,7 @@ fn start_reconciler_with_interval(
           Ok(locals)
         },
         hash_local_file: fn(_path) { hash_outcome },
-        native_policy: LinkFile,
+        native_policy: native_policy,
         round_interval_ms: round_interval_ms,
         today: fn() { "2026-07-22" },
       ),
@@ -117,6 +119,7 @@ fn start_reconciler(
     locals,
     hash_outcome,
     idle_round_interval,
+    LinkFile,
   )
 }
 
@@ -294,6 +297,70 @@ pub fn native_docs_are_planned_as_link_files_test() {
 
   let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
   assert remote.path == "notes.desktop"
+  assert remote.kind == GoogleNative
+}
+
+pub fn shortcuts_are_planned_as_links_to_their_target_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+  let shortcut =
+    RemoteSighting(
+      ..a_sighting("id-s", "link to report", "root"),
+      mime_type: "application/vnd.google-apps.shortcut",
+      size: None,
+      md5: None,
+      shortcut_target_id: Some("id-target"),
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [shortcut]))
+
+  let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
+  assert remote.path == "link to report.desktop"
+  assert remote.kind == entry.Shortcut("id-target")
+}
+
+pub fn a_shortcut_without_its_target_stays_out_of_the_mirror_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+  let shortcut =
+    RemoteSighting(
+      ..a_sighting("id-s", "broken link", "root"),
+      mime_type: "application/vnd.google-apps.shortcut",
+      size: None,
+      md5: None,
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [shortcut]))
+
+  assert expect_no_transfers(dispatches)
+}
+
+pub fn native_docs_are_planned_as_exports_under_the_office_policy_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut =
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [],
+      Error("unused"),
+      idle_round_interval,
+      entry.ExportOffice,
+    )
+  let native =
+    RemoteSighting(
+      ..a_sighting("id-doc", "notes", "root"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [native]))
+
+  let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
+  assert remote.path == "notes.docx"
   assert remote.kind == GoogleNative
 }
 
@@ -743,7 +810,14 @@ pub fn rounds_repeat_on_the_configured_interval_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let dispatches = process.new_subject()
   let sut =
-    start_reconciler_with_interval(owner, dispatches, [], Error("unused"), 25)
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [],
+      Error("unused"),
+      25,
+      LinkFile,
+    )
 
   process.send(sut, reconciler.SeedMirror("root", []))
 

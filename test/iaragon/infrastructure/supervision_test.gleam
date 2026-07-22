@@ -42,6 +42,9 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
         rename_remote: fn(_file_id, _name, _add, _remove) {
           Error("not under test")
         },
+        export_to_disk: fn(_file_id, _mime, _destination) {
+          Error("not under test")
+        },
       ),
       native_policy: entry.LinkFile,
     )

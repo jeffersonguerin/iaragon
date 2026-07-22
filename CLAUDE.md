@@ -235,20 +235,39 @@ parece localmente ausente; sem o guard `(None, Some(r), Some(k))` com
 rodada. Consequência documentada: deleção local de pasta VAZIA não
 propaga (a dos arquivos dela propaga).
 
-Limitações conhecidas: shortcuts fora do espelho (falta `shortcutDetails`
-na projeção); export de nativos (ExportOffice/ExportOdf) ainda materializa
-como link; pasta antiga pode sobrar vazia se o destino do move já existia
-(rodadas seguintes não a removem); deleção local de pasta vazia não
-propaga (ver sessão 8); rename local com edição simultânea do conteúdo
-muda a assinatura e vira trash+re-upload (converge, mas re-transfere).
+Fase export de nativos + shortcuts (sessão 9): **ExportOffice/ExportOdf
+exportam de verdade** Docs/Sheets/Slides (docx/xlsx/pptx e odt/ods/odp —
+MIMEs re-verificados na doc oficial em 2026-07; ODS é
+`application/vnd.oasis.opendocument.spreadsheet`, SEM o prefixo `x-` de
+docs antigas). `domain/native_docs.choose_materialisation(mime, policy)`
+→ `WriteLinkFile | ExportDocument(export_mime, extension)`; nativos sem
+export de documento (drawing só exporta imagem/PDF; form/site/map não têm)
+ficam link em qualquer política. Reconciler decide a EXTENSÃO no path
+(materialized_path); pool decide os BYTES (`export_to_disk` injetado —
+`files/{id}/export?mimeType=…` percent-encoded, mesmo FFI streaming de
+download, mesmo retry/drop). **shortcutDetails na projeção**: changes e
+files.list pedem `shortcutDetails(targetId)`; `ChangedFile`/`RemoteSighting`
+carregam `shortcut_target_id`; shortcut com alvo entra no espelho como
+link `.desktop` para o ALVO (`classify_sighting`); sem alvo visível fica
+fora, como antes.
 
-**Próximas sessões**: export real de nativos, shortcutDetails, watcher
-inotify (filespy) como alternativa ao polling do polly, overlays de file
-manager, remoção de pastas vazias órfãs.
+Limitações conhecidas: export falha para doc >10 MB (limite da API) e o
+download é re-decidido a cada rodada (1 chamada perdida por rodada, sem
+fallback automático p/ link); trocar `NativeDocPolicy` com espelho povoado
+move o arquivo antigo para o path novo sem re-exportar (conteúdo velho até
+a próxima edição remota do doc); pasta antiga pode sobrar vazia se o
+destino do move já existia (rodadas seguintes não a removem); deleção
+local de pasta vazia não propaga (ver sessão 8); rename local com edição
+simultânea do conteúdo muda a assinatura e vira trash+re-upload (converge,
+mas re-transfere).
+
+**Próximas sessões**: watcher inotify (filespy) como alternativa ao
+polling do polly, overlays de file manager, remoção de pastas vazias
+órfãs, fallback de export p/ >10 MB.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
-exata usada no parser; um redirect OAuth sem `code`/`error` é malformado, e
+exata usada no parser (incl. `shortcutDetails(targetId)`); um redirect OAuth sem `code`/`error` é malformado, e
 state errado invalida qualquer resultado; httpc `{stream, path}` faz append
 (ver FFI); md5 local em hex minúsculo como o Drive reporta.
 
