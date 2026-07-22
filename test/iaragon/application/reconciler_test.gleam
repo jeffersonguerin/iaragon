@@ -20,6 +20,7 @@ type Dispatch {
   TrashDispatched(file_id: String)
   ConflictCopyDispatched(remote: entry.RemoteFile, copy_path: String)
   MoveLocalDispatched(updated: entry.KnownFile, from: String)
+  MoveRemoteDispatched(plan: reconciler.MoveRemotePlan)
   SeedRequested
   LocalScanned
 }
@@ -86,6 +87,9 @@ fn start_reconciler_with_interval(
         },
         dispatch_move_local: fn(updated, from) {
           process.send(dispatches, MoveLocalDispatched(updated, from))
+        },
+        dispatch_move_remote: fn(plan) {
+          process.send(dispatches, MoveRemoteDispatched(plan))
         },
         request_seed: fn() { process.send(dispatches, SeedRequested) },
         scan_local: fn() {
@@ -632,6 +636,89 @@ pub fn a_remote_edit_survives_a_local_delete_test() {
   process.send(sut, reconciler.ReconcileNow)
   let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
   assert remote.file_id == "id-1"
+}
+
+// --- Local renames become remote moves ------------------------------------------
+
+pub fn a_local_rename_dispatches_a_remote_move_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  // Same size and mtime as the known snapshot, new path: a rename.
+  let renamed_local =
+    LocalFile(path: "docs/renamed.txt", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [
+      a_folder_sighting("id-docs", "docs", "root"),
+      a_sighting("id-1", "report.txt", "root"),
+    ]),
+  )
+
+  // The remote "docs" folder also materialises locally (bookkeeping); the
+  // move plan is what this test is about.
+  let assert [plan] =
+    receive_transfers(dispatches, 2)
+    |> list.filter_map(fn(dispatch) {
+      case dispatch {
+        MoveRemoteDispatched(plan) -> Ok(plan)
+        _ -> Error(Nil)
+      }
+    })
+  assert plan.file_id == "id-1"
+  assert plan.from_path == "report.txt"
+  assert plan.to_path == "docs/renamed.txt"
+  assert plan.new_name == "renamed.txt"
+  assert plan.old_parent_id == "root"
+  assert plan.anchor_parent_id == "id-docs"
+  assert plan.missing_folders == []
+
+  // What the pool does with the folder download: record it as known, so
+  // rounds stop re-materialising it.
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      KnownFile(
+        ..a_synced_known("id-docs", "docs"),
+        md5: None,
+        kind: entry.Folder,
+      ),
+    ),
+  )
+
+  // In flight: no re-dispatch until settled.
+  process.send(sut, reconciler.ReconcileNow)
+  assert expect_no_transfers(dispatches)
+}
+
+pub fn a_settled_remote_move_stops_being_dispatched_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(owner, state_owner.PutKnown(a_synced_known("id-1", "report.txt")))
+  let renamed_local =
+    LocalFile(path: "renamed.txt", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [renamed_local], Error("unused"))
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
+  )
+  let assert [MoveRemoteDispatched(_)] = receive_transfers(dispatches, 1)
+
+  // What the pool does on success: updated bookkeeping, then the settle
+  // carrying the renamed sighting.
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      KnownFile(..a_synced_known("id-1", "renamed.txt"), path: "renamed.txt"),
+    ),
+  )
+  let renamed_sighting =
+    RemoteSighting(..a_sighting("id-1", "renamed.txt", "root"), name: "renamed.txt")
+  process.send(sut, reconciler.SettleMove("id-1", Ok(renamed_sighting)))
+
+  assert expect_no_transfers(dispatches)
 }
 
 // --- Periodic rounds ----------------------------------------------------------

@@ -91,6 +91,7 @@ pub fn start_daemon(
       upload_to_drive: transfers.upload_to_drive,
       create_remote_folder: transfers.create_remote_folder,
       trash_remote: transfers.trash_remote,
+      rename_remote: transfers.rename_remote,
       settle_upload: fn(path, outcome) {
         process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
       },
@@ -105,6 +106,9 @@ pub fn start_daemon(
           reconciler_subject,
           reconciler.SettleConflict(path, outcome),
         )
+      },
+      settle_move: fn(file_id, outcome) {
+        process.send(reconciler_subject, reconciler.SettleMove(file_id, outcome))
       },
       observe_folder: fn(sighting) {
         process.send(
@@ -154,6 +158,9 @@ pub fn start_daemon(
           transfer_pool_subject,
           transfer_pool.EnqueueMoveLocal(updated, from),
         )
+      },
+      dispatch_move_remote: fn(plan) {
+        process.send(transfer_pool_subject, transfer_pool.EnqueueMoveRemote(plan))
       },
       request_seed: fn() {
         process.send(

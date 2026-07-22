@@ -39,6 +39,9 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
         upload_to_drive: fn(_target, _source, _size) { Error("not under test") },
         create_remote_folder: fn(_name, _parent) { Error("not under test") },
         trash_remote: fn(_file_id) { Error("not under test") },
+        rename_remote: fn(_file_id, _name, _add, _remove) {
+          Error("not under test")
+        },
       ),
       native_policy: entry.LinkFile,
     )

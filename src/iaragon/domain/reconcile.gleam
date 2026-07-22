@@ -54,9 +54,17 @@ pub fn reconcile(
         True -> Conflict(k.path, k.file_id, LocalEditRemoteDelete)
       }
     None, Some(r), Some(k) ->
-      case detect_remote_change(r, k) {
-        False -> DeleteRemote(r.file_id)
-        True -> Conflict(k.path, k.file_id, RemoteEditLocalDelete)
+      case k.kind {
+        // The local scan lists files, never directories: a synced folder
+        // always looks locally absent, and that must not read as deleted.
+        // (Local deletion of an EMPTY folder therefore does not propagate;
+        // its files' deletions do.)
+        entry.Folder -> Noop
+        entry.Blob | entry.GoogleNative | entry.Shortcut(_) ->
+          case detect_remote_change(r, k) {
+            False -> DeleteRemote(r.file_id)
+            True -> Conflict(k.path, k.file_id, RemoteEditLocalDelete)
+          }
       }
     Some(l), Some(r), Some(k) ->
       case r.path != k.path {

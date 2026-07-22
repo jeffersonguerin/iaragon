@@ -23,7 +23,9 @@ import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
-import iaragon/application/reconciler.{type RemoteSighting, type UploadPlan}
+import iaragon/application/reconciler.{
+  type MoveRemotePlan, type RemoteSighting, type UploadPlan,
+}
 import iaragon/application/state_owner
 import iaragon/domain/entry.{
   type NativeDocPolicy, type RemoteFile, Blob, Folder, GoogleNative, KnownFile,
@@ -49,11 +51,15 @@ pub type Command {
   /// already carried to its destination (e.g. by a parent folder rename)
   /// only gets its bookkeeping.
   EnqueueMoveLocal(updated: entry.KnownFile, from: String)
+  /// Apply a local rename remotely: files.update (name + parent swap),
+  /// creating any missing destination folders first — no bytes transferred.
+  EnqueueMoveRemote(plan: MoveRemotePlan)
   /// Internal: scheduled retries of failed transfers.
   RetryDownload(remote: RemoteFile, failed_attempts: Int)
   RetryUpload(plan: UploadPlan, failed_attempts: Int)
   RetryTrash(file_id: String, failed_attempts: Int)
   RetryConflictCopy(remote: RemoteFile, copy_path: String, failed_attempts: Int)
+  RetryMoveRemote(plan: MoveRemotePlan, failed_attempts: Int)
 }
 
 /// The authenticated Drive operations, grouped so the composition root can
@@ -65,6 +71,8 @@ pub type DriveTransferOps {
       Result(ChangedFile, String),
     create_remote_folder: fn(String, String) -> Result(ChangedFile, String),
     trash_remote: fn(String) -> Result(Nil, String),
+    rename_remote: fn(String, String, String, String) ->
+      Result(ChangedFile, String),
   )
 }
 
@@ -79,10 +87,14 @@ pub type TransferConfig {
       Result(ChangedFile, String),
     create_remote_folder: fn(String, String) -> Result(ChangedFile, String),
     trash_remote: fn(String) -> Result(Nil, String),
+    /// (file_id, new_name, add_parent_id, remove_parent_id).
+    rename_remote: fn(String, String, String, String) ->
+      Result(ChangedFile, String),
     /// Outcome feedback into the reconciler (path / file_id keyed).
     settle_upload: fn(String, Result(RemoteSighting, String)) -> Nil,
     settle_trash: fn(String, Result(Nil, String)) -> Nil,
     settle_conflict: fn(String, Result(Nil, String)) -> Nil,
+    settle_move: fn(String, Result(RemoteSighting, String)) -> Nil,
     /// Folders created on the way to an upload enter the remote model here.
     observe_folder: fn(RemoteSighting) -> Nil,
     state_owner: Subject(state_owner.Command),
@@ -148,6 +160,9 @@ fn handle_command(
       run_move_local(state.config, updated, from)
       actor.continue(state)
     }
+    EnqueueMoveRemote(plan) -> run_move_remote(state, plan, 0)
+    RetryMoveRemote(plan, failed_attempts) ->
+      run_move_remote(state, plan, failed_attempts)
     EnqueueConflictCopy(remote, copy_path) ->
       run_conflict_copy(state, remote, copy_path, 0)
     RetryConflictCopy(remote, copy_path, failed_attempts) ->
@@ -197,6 +212,65 @@ fn source_exists(path: String) -> Bool {
 fn destination_exists(path: String) -> Bool {
   simplifile.is_file(path) == Ok(True)
   || simplifile.is_directory(path) == Ok(True)
+}
+
+// --- Remote moves (local renames) -------------------------------------------------
+
+fn run_move_remote(
+  state: State,
+  plan: MoveRemotePlan,
+  failed_attempts: Int,
+) -> actor.Next(State, Command) {
+  case ensure_remote_folders_for(state, plan.anchor_parent_id, plan.missing_folders) {
+    Ok(#(state, parent_id)) ->
+      case
+        state.config.rename_remote(
+          plan.file_id,
+          plan.new_name,
+          parent_id,
+          plan.old_parent_id,
+        )
+      {
+        Ok(renamed) -> {
+          record_known(
+            state.config,
+            renamed.file_id,
+            plan.to_path,
+            renamed.modified_time,
+            renamed.md5,
+            plan.local.size,
+            Blob,
+          )
+          state.config.settle_move(
+            plan.file_id,
+            Ok(remote_poller.translate_file(renamed)),
+          )
+          actor.continue(state)
+        }
+        Error(reason) -> {
+          settle_move_or_retry(state, plan, failed_attempts, reason)
+          actor.continue(state)
+        }
+      }
+    Error(reason) -> {
+      settle_move_or_retry(state, plan, failed_attempts, reason)
+      actor.continue(state)
+    }
+  }
+}
+
+fn settle_move_or_retry(
+  state: State,
+  plan: MoveRemotePlan,
+  failed_attempts: Int,
+  reason: String,
+) -> Nil {
+  retry_or(
+    state,
+    failed_attempts,
+    fn(attempts) { RetryMoveRemote(plan, attempts) },
+    give_up: fn() { state.config.settle_move(plan.file_id, Error(reason)) },
+  )
 }
 
 // --- Conflicted copies ----------------------------------------------------------
@@ -357,7 +431,9 @@ fn run_upload(
   plan: UploadPlan,
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
-  case ensure_remote_folders(state, plan) {
+  case
+    ensure_remote_folders_for(state, plan.anchor_parent_id, plan.missing_folders)
+  {
     Ok(#(state, parent_id)) ->
       case push_file(state.config, plan, parent_id) {
         Ok(Nil) -> actor.continue(state)
@@ -375,13 +451,14 @@ fn run_upload(
 
 /// Create the plan's missing folder chain (outermost first), reusing ids of
 /// folders this pool already created. Returns the final parent id.
-fn ensure_remote_folders(
+fn ensure_remote_folders_for(
   state: State,
-  plan: UploadPlan,
+  anchor_parent_id: String,
+  missing_folders: List(String),
 ) -> Result(#(State, String), String) {
   list.try_fold(
-    plan.missing_folders,
-    #(state, plan.anchor_parent_id),
+    missing_folders,
+    #(state, anchor_parent_id),
     fn(acc, folder_name) {
       let #(state, parent_id) = acc
       let cache_key = parent_id <> "/" <> folder_name

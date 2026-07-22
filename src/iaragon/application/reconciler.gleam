@@ -65,6 +65,22 @@ pub type UploadPlan {
   )
 }
 
+/// Everything the transfer side needs to rename/move one remote file to
+/// match a local rename: identity, the new name, the parent swap, and the
+/// folder chain still to be created (like uploads).
+pub type MoveRemotePlan {
+  MoveRemotePlan(
+    file_id: String,
+    from_path: String,
+    to_path: String,
+    new_name: String,
+    old_parent_id: String,
+    anchor_parent_id: String,
+    missing_folders: List(String),
+    local: LocalFile,
+  )
+}
+
 pub type Command {
   /// The full remote snapshot plus the real root id: replaces the model and
   /// runs a reconciliation round.
@@ -82,6 +98,9 @@ pub type Command {
   /// Outcome of a dispatched conflicted-copy resolution (path keyed). The
   /// moved-aside copy surfaces in the next scan and uploads as a new file.
   SettleConflict(path: String, outcome: Result(Nil, String))
+  /// Outcome of a dispatched remote move (file_id keyed). Success carries
+  /// the renamed sighting straight into the model.
+  SettleMove(file_id: String, outcome: Result(RemoteSighting, String))
   /// Run a round without new remote input — local edits have no other
   /// trigger until a filesystem watcher lands.
   ReconcileNow
@@ -98,6 +117,8 @@ pub type ReconcilerConfig {
     dispatch_conflict_copy: fn(RemoteFile, String) -> Nil,
     /// Remote rename: (known snapshot with the NEW path, old path).
     dispatch_move_local: fn(entry.KnownFile, String) -> Nil,
+    /// Local rename: rename the remote file instead of re-uploading.
+    dispatch_move_remote: fn(MoveRemotePlan) -> Nil,
     /// Ask the poller for a fresh seed — used when observations arrive but
     /// the in-memory model is gone (this actor was restarted).
     request_seed: fn() -> Nil,
@@ -120,10 +141,13 @@ type State {
     root_id: Option(String),
     model: Dict(String, RemoteSighting),
     /// Paths with an upload or conflict resolution in flight and file ids
-    /// with a trash in flight: never re-dispatched until settled.
+    /// with a trash in flight: never re-dispatched until settled. A remote
+    /// move holds both keys (its file_id and its destination path), tracked
+    /// in pending_move_paths for the settle to clear.
     pending_uploads: Set(String),
     pending_trashes: Set(String),
     pending_conflicts: Set(String),
+    pending_move_paths: Dict(String, String),
   )
 }
 
@@ -154,6 +178,7 @@ pub fn start(
     pending_uploads: set.new(),
     pending_trashes: set.new(),
     pending_conflicts: set.new(),
+    pending_move_paths: dict.new(),
   ))
   |> actor.on_message(handle_command)
   |> actor.named(name)
@@ -225,6 +250,27 @@ fn handle_command(
           ..state,
           pending_conflicts: set.delete(state.pending_conflicts, path),
         )
+      actor.continue(run_round_if_seeded(state))
+    }
+    SettleMove(file_id, outcome) -> {
+      let state = case outcome {
+        Ok(sighting) ->
+          State(
+            ..state,
+            model: dict.insert(state.model, sighting.file_id, sighting),
+          )
+        Error(_reason) -> state
+      }
+      // A move holds both pending keys (the vanished id and the new path).
+      let state = forget_pending_trash(state, file_id)
+      let state = case dict.get(state.pending_move_paths, file_id) {
+        Ok(path) ->
+          State(
+            ..forget_pending_upload(state, path),
+            pending_move_paths: dict.delete(state.pending_move_paths, file_id),
+          )
+        Error(Nil) -> state
+      }
       actor.continue(run_round_if_seeded(state))
     }
     ReconcileNow -> {
@@ -341,8 +387,16 @@ fn run_round(state: State) -> State {
         }
         state
       }
-      // Dispatch wired after the remote-move transfer support lands.
-      decision.MoveRemote(_file_id, _from, _to) -> state
+      decision.MoveRemote(file_id, from, to) ->
+        dispatch_move_remote_once(
+          state,
+          file_id,
+          from,
+          to,
+          locals_by_path,
+          folder_ids_by_path,
+          root_id,
+        )
       decision.AdoptKnown(file_id, path) -> {
         adopt_twin(config, file_id, path, remote_by_id, locals_by_path)
         state
@@ -414,6 +468,50 @@ fn resolve_conflict(
       process.send(state.config.state_owner, state_owner.ForgetKnown(file_id))
       state
     }
+  }
+}
+
+/// A remote move needs the file's CURRENT remote parent (from the model) and
+/// the destination's anchor + missing folder chain (like uploads). It holds
+/// both pending keys until settled: its file_id (blocks DeleteRemote) and
+/// its destination path (blocks UploadLocal).
+fn dispatch_move_remote_once(
+  state: State,
+  file_id: String,
+  from: String,
+  to: String,
+  locals_by_path: Dict(String, LocalFile),
+  folder_ids_by_path: Dict(String, String),
+  root_id: String,
+) -> State {
+  let in_flight = set.contains(state.pending_trashes, file_id)
+  case
+    in_flight,
+    dict.get(state.model, file_id),
+    dict.get(locals_by_path, to)
+  {
+    False, Ok(sighting), Ok(local) -> {
+      let #(directory_segments, name) = split_file_name(to)
+      let #(anchor_parent_id, missing_folders) =
+        resolve_upload_anchor(directory_segments, folder_ids_by_path, root_id)
+      state.config.dispatch_move_remote(MoveRemotePlan(
+        file_id: file_id,
+        from_path: from,
+        to_path: to,
+        new_name: name,
+        old_parent_id: option.unwrap(sighting.parent_id, root_id),
+        anchor_parent_id: anchor_parent_id,
+        missing_folders: missing_folders,
+        local: local,
+      ))
+      State(
+        ..state,
+        pending_trashes: set.insert(state.pending_trashes, file_id),
+        pending_uploads: set.insert(state.pending_uploads, to),
+        pending_move_paths: dict.insert(state.pending_move_paths, file_id, to),
+      )
+    }
+    _, _, _ -> state
   }
 }
 

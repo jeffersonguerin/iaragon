@@ -73,9 +73,13 @@ fn a_pool_config(
       panic as "no folder creation expected in this test"
     },
     trash_remote: fn(_file_id) { panic as "no trash expected in this test" },
+    rename_remote: fn(_file_id, _new_name, _add, _remove) {
+      panic as "no remote rename expected in this test"
+    },
     settle_upload: fn(_path, _outcome) { Nil },
     settle_trash: fn(_file_id, _outcome) { Nil },
     settle_conflict: fn(_path, _outcome) { Nil },
+    settle_move: fn(_file_id, _outcome) { Nil },
     observe_folder: fn(_sighting) { Nil },
     state_owner: owner,
     native_policy: LinkFile,
@@ -587,6 +591,135 @@ pub fn a_failing_conflict_download_settles_the_failure_test() {
   let assert Ok(ConflictSettled("report.txt", Error(_))) =
     process.receive(events, 2000)
   Nil
+}
+
+// --- Remote moves (local renames) ------------------------------------------------
+
+type MoveEvent {
+  RenameCalled(
+    file_id: String,
+    new_name: String,
+    add_parent_id: String,
+    remove_parent_id: String,
+  )
+  MoveSettled(file_id: String, outcome: Result(reconciler.RemoteSighting, String))
+}
+
+fn a_move_plan(to_path: String, name: String) -> reconciler.MoveRemotePlan {
+  reconciler.MoveRemotePlan(
+    file_id: "id-1",
+    from_path: "old.txt",
+    to_path: to_path,
+    new_name: name,
+    old_parent_id: "id-old-parent",
+    anchor_parent_id: "root-1",
+    missing_folders: [],
+    local: LocalFile(path: to_path, size: 5, mtime_seconds: 1000, md5: None),
+  )
+}
+
+pub fn a_remote_move_renames_without_any_transfer_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/remote-move"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      rename_remote: fn(file_id, new_name, add_parent_id, remove_parent_id) {
+        process.send(
+          events,
+          RenameCalled(file_id, new_name, add_parent_id, remove_parent_id),
+        )
+        Ok(changes.ChangedFile(
+          ..an_uploaded_file("id-1", new_name),
+          parent_id: Some(add_parent_id),
+        ))
+      },
+      settle_move: fn(file_id, outcome) {
+        process.send(events, MoveSettled(file_id, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueMoveRemote(a_move_plan("renamed.txt", "renamed.txt")),
+  )
+
+  let assert Ok(RenameCalled("id-1", "renamed.txt", "root-1", "id-old-parent")) =
+    process.receive(events, 1000)
+  let assert Ok(MoveSettled("id-1", Ok(sighting))) = process.receive(events, 1000)
+  assert sighting.name == "renamed.txt"
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
+  let assert Some(known) = known_of(owner, "id-1")
+  assert known.path == "renamed.txt"
+  assert known.size == 5
+}
+
+pub fn a_move_into_a_new_folder_creates_it_first_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/remote-move-folder"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      create_remote_folder: fn(name, parent_id) {
+        process.send(events, RenameCalled("folder", name, parent_id, ""))
+        Ok(changes.ChangedFile(
+          ..an_uploaded_file("id-docs", name),
+          mime_type: "application/vnd.google-apps.folder",
+          size: None,
+          md5: None,
+        ))
+      },
+      rename_remote: fn(file_id, new_name, add_parent_id, remove_parent_id) {
+        process.send(
+          events,
+          RenameCalled(file_id, new_name, add_parent_id, remove_parent_id),
+        )
+        Ok(an_uploaded_file("id-1", new_name))
+      },
+      settle_move: fn(_file_id, _outcome) { Nil },
+    )
+  let pool = start_pool_with(config)
+  let plan =
+    reconciler.MoveRemotePlan(
+      ..a_move_plan("docs/renamed.txt", "renamed.txt"),
+      missing_folders: ["docs"],
+    )
+
+  process.send(pool, transfer_pool.EnqueueMoveRemote(plan))
+
+  let assert Ok(RenameCalled("folder", "docs", "root-1", "")) =
+    process.receive(events, 1000)
+  let assert Ok(RenameCalled("id-1", "renamed.txt", "id-docs", "id-old-parent")) =
+    process.receive(events, 1000)
+  Nil
+}
+
+pub fn a_failing_remote_move_settles_the_failure_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let events = process.new_subject()
+  let root = scratch_dir <> "/remote-move-fail"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      rename_remote: fn(_file_id, _new_name, _add, _remove) {
+        Error("always down")
+      },
+      settle_move: fn(file_id, outcome) {
+        process.send(events, MoveSettled(file_id, outcome))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueMoveRemote(a_move_plan("renamed.txt", "renamed.txt")),
+  )
+
+  let assert Ok(MoveSettled("id-1", Error(_))) = process.receive(events, 2000)
+  assert known_of(owner, "id-1") == None
 }
 
 // --- Trash ----------------------------------------------------------------------

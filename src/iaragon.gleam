@@ -93,6 +93,18 @@ fn build_transfer_ops(config_dir: String) -> transfer_pool.DriveTransferOps {
       )
       |> result.map_error(string.inspect)
     },
+    rename_remote: fn(file_id, new_name, add_parent_id, remove_parent_id) {
+      use access_token <- result.try(obtain_access_token(config_dir))
+      mutate.rename_file(
+        send_over_httpc,
+        access_token: access_token,
+        file_id: file_id,
+        new_name: new_name,
+        add_parent_id: add_parent_id,
+        remove_parent_id: remove_parent_id,
+      )
+      |> result.map_error(string.inspect)
+    },
   )
 }
 

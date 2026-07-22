@@ -167,6 +167,32 @@ pub fn remote_edit_with_local_delete_conflicts_test() {
     == Conflict("docs/report.txt", "id-1", RemoteEditLocalDelete)
 }
 
+pub fn a_synced_folder_is_not_deleted_for_being_unscannable_test() {
+  // The local scan lists files, never directories: a synced folder always
+  // looks locally absent. That must NOT read as "deleted locally".
+  let folder_remote =
+    RemoteFile(
+      ..a_remote(),
+      file_id: "id-docs",
+      name: "docs",
+      path: "docs",
+      mime_type: "application/vnd.google-apps.folder",
+      size: None,
+      md5: None,
+      kind: entry.Folder,
+    )
+  let folder_known =
+    KnownFile(
+      ..a_known(),
+      file_id: "id-docs",
+      path: "docs",
+      md5: None,
+      kind: entry.Folder,
+    )
+  assert reconcile.reconcile(None, Some(folder_remote), Some(folder_known))
+    == Noop
+}
+
 pub fn trashed_remote_of_unknown_file_noops_test() {
   // A file we never synced got trashed remotely: nothing to mirror, nothing
   // to forget.
