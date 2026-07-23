@@ -746,6 +746,65 @@ pub fn an_edit_edit_conflict_dispatches_a_conflicted_copy_test() {
   assert expect_no_transfers(dispatches)
 }
 
+fn an_edited_native(policy: entry.NativeDocPolicy, path: String) {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(
+    owner,
+    state_owner.PutKnown(KnownFile(
+      file_id: "id-doc",
+      path: path,
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: None,
+      size: 42,
+      local_mtime_seconds: 1000,
+      kind: GoogleNative,
+    )),
+  )
+  let edited = LocalFile(path: path, size: 99, mtime_seconds: 2000, md5: None)
+  let dispatches = process.new_subject()
+  let sut =
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [edited],
+      Error("unused"),
+      idle_round_interval,
+      policy,
+      fn() { Error(Nil) },
+    )
+  let native =
+    RemoteSighting(
+      ..a_sighting("id-doc", "notes", "root"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+    )
+  process.send(sut, reconciler.SeedMirror("root", [native]))
+  dispatches
+}
+
+// Under an export policy the exported native is a real editable file: a local
+// edit is preserved as a conflicted-copy blob (the source Doc re-exports at
+// the original path via the same conflict machinery) — never pushed back.
+pub fn an_edited_native_export_becomes_a_conflicted_copy_test() {
+  let dispatches = an_edited_native(entry.ExportOffice, "notes.docx")
+
+  let assert [ConflictCopyDispatched(remote, copy_path)] =
+    receive_transfers(dispatches, 1)
+  assert remote.file_id == "id-doc"
+  assert remote.path == "notes.docx"
+  assert copy_path == "notes (conflicted copy 2026-07-22).docx"
+}
+
+// Under LinkFile the local file is a generated .desktop link, not user
+// content: an edit is simply overwritten by re-materialising the link.
+pub fn an_edited_native_link_is_just_rewritten_test() {
+  let dispatches = an_edited_native(entry.LinkFile, "notes.desktop")
+
+  let assert [DownloadDispatched(remote)] = receive_transfers(dispatches, 1)
+  assert remote.file_id == "id-doc"
+}
+
 pub fn divergent_never_synced_twins_conflict_into_a_copy_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let local =

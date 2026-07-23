@@ -2,8 +2,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import iaragon/domain/decision.{
   AdoptKnown, BothCreated, Conflict, DeleteLocal, DeleteRemote, DownloadRemote,
-  EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, MoveRemote, Noop,
-  RemoteEditLocalDelete, UploadLocal,
+  EditEdit, ForgetKnown, LocalEditRemoteDelete, MoveLocal, MoveRemote,
+  NativeLocalEdit, Noop, RemoteEditLocalDelete, UploadLocal,
 }
 import iaragon/domain/entry.{
   Blob, GoogleNative, KnownFile, LocalFile, RemoteFile,
@@ -289,9 +289,11 @@ fn a_native_known() -> entry.KnownFile {
   )
 }
 
-pub fn native_edited_locally_never_uploads_test() {
-  // Exports are lossy and capped at 10 MB; uploading a local edit back would
-  // destroy the source document. The mirror self-heals by re-downloading.
+pub fn native_edited_locally_conflicts_test() {
+  // A local edit of a native cannot be pushed back (import replaces/converts
+  // the Doc — unsafe on the documented API), so reconcile reports it as a
+  // conflict. The application resolves it by policy (an export policy keeps
+  // the edit as a conflicted-copy blob; LinkFile just rewrites the link).
   let local =
     LocalFile(path: "docs/notes", size: 99, mtime_seconds: 2000, md5: None)
   assert reconcile.reconcile(
@@ -299,7 +301,7 @@ pub fn native_edited_locally_never_uploads_test() {
       Some(a_native_remote()),
       Some(a_native_known()),
     )
-    == DownloadRemote("id-doc", "docs/notes")
+    == Conflict("docs/notes", "id-doc", NativeLocalEdit)
 }
 
 pub fn native_edited_remotely_downloads_test() {
@@ -311,15 +313,15 @@ pub fn native_edited_remotely_downloads_test() {
     == DownloadRemote("id-doc", "docs/notes")
 }
 
-pub fn native_edited_on_both_sides_downloads_without_conflict_test() {
-  // Natives are download-only: the remote copy is authoritative by policy,
-  // so there is no edit-edit conflict to surface.
+pub fn native_edited_on_both_sides_conflicts_test() {
+  // Local edit present (regardless of the remote also moving): the local edit
+  // must not be silently discarded, so it surfaces as a conflict to preserve.
   let remote =
     RemoteFile(..a_native_remote(), modified_time: "2026-07-02T09:00:00Z")
   let local =
     LocalFile(path: "docs/notes", size: 99, mtime_seconds: 2000, md5: None)
   assert reconcile.reconcile(Some(local), Some(remote), Some(a_native_known()))
-    == DownloadRemote("id-doc", "docs/notes")
+    == Conflict("docs/notes", "id-doc", NativeLocalEdit)
 }
 
 pub fn native_created_on_both_sides_downloads_test() {

@@ -7,6 +7,13 @@ pub type ConflictKind {
   LocalEditRemoteDelete
   RemoteEditLocalDelete
   BothCreated
+  /// A Google-native's local export was edited. Its content cannot be pushed
+  /// back (importing a doc into an existing native replaces/converts it — not
+  /// safe on the documented API), so the edit is preserved by policy: under an
+  /// export policy it becomes a conflicted-copy blob while the remote re-
+  /// exports at the original path; under LinkFile the generated link is just
+  /// rewritten.
+  NativeLocalEdit
 }
 
 pub type SyncDecision {

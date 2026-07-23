@@ -546,26 +546,61 @@ fn resolve_conflict(
 ) -> State {
   case kind {
     decision.EditEdit | decision.BothCreated ->
-      case
-        set.contains(state.pending_conflicts, path),
-        dict.get(remote_by_id, file_id)
-      {
-        False, Ok(remote) -> {
-          state.config.dispatch_conflict_copy(
-            remote,
-            conflicts.build_conflicted_copy_path(path, state.config.today()),
-          )
-          State(
-            ..state,
-            pending_conflicts: set.insert(state.pending_conflicts, path),
-          )
+      dispatch_conflict_copy_once(state, path, file_id, remote_by_id)
+    // A native's local export was edited and can't be pushed back safely.
+    // Under an export policy, preserve the edit exactly like an edit-edit
+    // conflict: it moves aside as a new blob and the remote re-exports at the
+    // original path. Under LinkFile the local file is a generated .desktop
+    // link, not user content — just rewrite it, dropping the edit.
+    decision.NativeLocalEdit ->
+      case native_edits_become_conflicts(state.config.native_policy) {
+        True -> dispatch_conflict_copy_once(state, path, file_id, remote_by_id)
+        False -> {
+          case dict.get(remote_by_id, file_id) {
+            Ok(remote) -> state.config.dispatch_download(remote, None)
+            Error(Nil) -> Nil
+          }
+          state
         }
-        _, _ -> state
       }
     decision.LocalEditRemoteDelete | decision.RemoteEditLocalDelete -> {
       process.send(state.config.state_owner, state_owner.ForgetKnown(file_id))
       state
     }
+  }
+}
+
+fn dispatch_conflict_copy_once(
+  state: State,
+  path: String,
+  file_id: String,
+  remote_by_id: Dict(String, RemoteFile),
+) -> State {
+  case
+    set.contains(state.pending_conflicts, path),
+    dict.get(remote_by_id, file_id)
+  {
+    False, Ok(remote) -> {
+      state.config.dispatch_conflict_copy(
+        remote,
+        conflicts.build_conflicted_copy_path(path, state.config.today()),
+      )
+      State(
+        ..state,
+        pending_conflicts: set.insert(state.pending_conflicts, path),
+      )
+    }
+    _, _ -> state
+  }
+}
+
+/// A local edit of an exported native becomes a conflicted copy only when the
+/// native is materialised as a real editable file — i.e. under an export
+/// policy. Under LinkFile it is a generated browser link.
+fn native_edits_become_conflicts(policy: NativeDocPolicy) -> Bool {
+  case policy {
+    entry.LinkFile -> False
+    entry.ExportOffice | entry.ExportOdf -> True
   }
 }
 

@@ -12,7 +12,8 @@ import gleam/set
 import iaragon/domain/decision.{
   type SyncDecision, AdoptKnown, BothCreated, Conflict, DeleteLocal,
   DeleteRemote, DownloadRemote, EditEdit, ForgetKnown, LocalEditRemoteDelete,
-  MoveLocal, MoveRemote, Noop, RemoteEditLocalDelete, UploadLocal,
+  MoveLocal, MoveRemote, NativeLocalEdit, Noop, RemoteEditLocalDelete,
+  UploadLocal,
 }
 import iaragon/domain/entry.{type KnownFile, type LocalFile, type RemoteFile}
 
@@ -91,13 +92,16 @@ fn reconcile_in_place(
   k: KnownFile,
 ) -> SyncDecision {
   case r.kind {
-    // Download-only by policy: a local edit of a native is never
-    // uploaded (it would destroy the source document); the mirror
-    // self-heals by re-downloading whenever either side moved.
+    // A native's content cannot round-trip (importing a doc into an existing
+    // native replaces/converts it — not safe on the documented API). So a
+    // LOCAL edit is never uploaded: it surfaces as a conflict for the
+    // application to preserve by policy. A purely REMOTE change re-exports
+    // over the (unchanged) local copy.
     entry.GoogleNative ->
       case detect_local_change(l, k), detect_remote_change(r, k) {
         False, False -> Noop
-        _, _ -> DownloadRemote(r.file_id, k.path)
+        False, True -> DownloadRemote(r.file_id, k.path)
+        True, _ -> Conflict(k.path, k.file_id, NativeLocalEdit)
       }
     entry.Blob | entry.Folder | entry.Shortcut(_) ->
       case detect_local_change(l, k), detect_remote_change(r, k) {
