@@ -18,9 +18,19 @@ class Iaragon < Formula
   license "Apache-2.0"
   head "https://github.com/jeffersonguerin/iaragon.git", branch: "main"
 
+  # When installed via Homebrew, the whole toolchain comes via Homebrew — one
+  # consistent source, no mixing with a system package manager. Existing brew
+  # installs of these are reused, not duplicated.
   depends_on "gleam" => :build
   depends_on "rebar3" => :build
   depends_on "erlang"
+
+  # The inotify watcher is a Linux-only runtime dependency; on macOS the
+  # daemon uses polling. Brought in through brew too, to keep the method
+  # consistent.
+  on_linux do
+    depends_on "inotify-tools"
+  end
 
   def install
     # Produce a self-contained precompiled Erlang release.
@@ -56,8 +66,8 @@ class Iaragon < Formula
       On Linux you can supervise it as a systemd user service; see
       dist/iaragon.service in the repository. The mirror lives at ~/GoogleDrive.
 
-      The inotify watcher needs inotify-tools at runtime; without it the daemon
-      falls back to polling.
+      Erlang, Gleam, rebar3 (and inotify-tools on Linux) were installed as
+      Homebrew dependencies, so the whole toolchain stays under brew.
     EOS
   end
 

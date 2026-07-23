@@ -38,18 +38,30 @@ of them restarts that actor alone.
 
 ### curl (Linux)
 
-Builds from source and installs a per-user daemon under `~/.local`. It uses
-your package manager (via `sudo`) only to install missing build tools, and
-bootstraps Gleam/rebar3 if absent. Erlang/OTP ≥ 26 is required at runtime;
-if your distro's Erlang is older, the script stops and tells you how to get
-a newer one rather than installing something that would crash.
+Builds from source and installs a per-user daemon under `~/.local`.
 
 ```sh
 curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install.sh | sh
 ```
 
+- **No conflicts with your toolchain**: any dependency already installed —
+  by any means (apt, brew, kerl, asdf, a manual build) — is detected and
+  kept. Nothing is reinstalled or duplicated; only what is missing gets
+  installed.
+- **Consistent method**: missing dependencies come from the one package
+  manager detected on your system (apt → all from apt, and so on). A direct
+  binary download is used only for a dependency your manager doesn't package
+  (Gleam isn't in apt/dnf/zypper), and the script says so when it happens.
+- **Transparent**: it prints a plan of what's present and what it will
+  install before acting, echoes the exact command per package, and shows a
+  summary at the end.
+- Erlang/OTP ≥ 26 is required at runtime; if your distro's Erlang is older,
+  the script stops with instructions rather than installing something that
+  would crash.
+
 Overridable by environment: `IARAGON_REF` (git ref, default `main`),
-`IARAGON_PREFIX` (default `~/.local`), `IARAGON_REPO`, `GLEAM_VERSION`,
+`IARAGON_PREFIX` (default `~/.local`), `IARAGON_PM` (force the package
+manager for missing deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`,
 `IARAGON_NO_SUDO=1`.
 
 It installs the `iaragon` (daemon) and `iaragon-login` launchers to
@@ -64,8 +76,10 @@ Rolling release — no version tags, so the formula is HEAD-only:
 brew install --HEAD jeffersonguerin/iaragon/iaragon
 ```
 
-(The daemon targets Linux; the formula builds on macOS too, but the sync
-daemon is meant for a Linux desktop.)
+The whole toolchain (Erlang, Gleam, rebar3, and `inotify-tools` on Linux)
+comes through Homebrew as formula dependencies — one consistent source, no
+mixing with a system package manager. (The daemon targets Linux; the formula
+builds on macOS too, but the sync daemon is meant for a Linux desktop.)
 
 ## Running
 
