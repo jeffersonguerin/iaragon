@@ -157,6 +157,54 @@ pub fn an_initiate_without_a_session_url_is_unexpected_test() {
     )
 }
 
+// PENTEST — the session URI comes from the initiate response's Location
+// header (attacker-influenceable). If it points off Google's hosts the client
+// must refuse rather than PUT the user's file bytes there (SSRF / content
+// exfiltration).
+pub fn a_session_uri_off_googleapis_is_refused_test() {
+  let inbox = process.new_subject()
+  let send = fn(sent: request.Request(BitArray)) {
+    process.send(inbox, sent)
+    Ok(response.Response(
+      status: 200,
+      headers: [#("location", "http://evil.example/steal")],
+      body: "",
+    ))
+  }
+  let source = a_source_file("evil.txt", "abcdef")
+  let assert Error(changes.UnexpectedPayload(_)) =
+    upload.upload_file(
+      send,
+      access_token: "at-1",
+      target: CreateFile(name: "x", parent_id: "p-1"),
+      source_path: source,
+      total_size: 6,
+      chunk_size: 6,
+    )
+  // Only the initiate went out — no chunk PUT reached the attacker host.
+  let assert Ok(_initiate) = process.receive(inbox, 100)
+  assert process.receive(inbox, 100) == Error(Nil)
+}
+
+// PENTEST — the update path builds files/{id}; a crafted file_id must be
+// percent-encoded so it cannot inject query params into the mutating call.
+pub fn the_update_file_id_is_percent_encoded_test() {
+  let inbox = process.new_subject()
+  let source = a_source_file("enc.txt", "abcdef")
+  let assert Ok(_) =
+    upload.upload_file(
+      a_session_send(inbox),
+      access_token: "at-1",
+      target: UpdateFile(file_id: "id/../x?a=b"),
+      source_path: source,
+      total_size: 6,
+      chunk_size: 6,
+    )
+  let assert Ok(initiate) = process.receive(inbox, 100)
+  assert !string.contains(initiate.path, "id/../")
+  assert string.contains(initiate.path, "id%2F..%2Fx%3Fa%3Db")
+}
+
 pub fn a_mid_upload_refusal_reports_the_status_test() {
   let inbox = process.new_subject()
   let send = fn(sent: request.Request(BitArray)) {

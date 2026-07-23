@@ -12,7 +12,10 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json
+import gleam/option.{Some}
 import gleam/result
+import gleam/string
+import gleam/uri
 import iaragon/infrastructure/drive/changes.{
   type ChangedFile, type DriveError, RefusedByServer, TransportFailed,
   UnexpectedPayload,
@@ -67,7 +70,7 @@ fn initiate_session(
     )
     UpdateFile(file_id) -> #(
       http.Patch,
-      "/upload/drive/v3/files/" <> file_id,
+      "/upload/drive/v3/files/" <> uri.percent_encode(file_id),
       json.object([]),
     )
   }
@@ -92,7 +95,30 @@ fn initiate_session(
       |> result.replace_error(UnexpectedPayload(
         "no session URI in the initiate response",
       ))
+      |> result.try(validate_session_uri)
     status -> Error(RefusedByServer(status, response.body))
+  }
+}
+
+/// The session URI is used verbatim as the PUT target for the file's bytes,
+/// so a hostile/buggy initiate response could redirect uploads to an attacker
+/// host (SSRF / content exfiltration). Accept only HTTPS on a Google host.
+fn validate_session_uri(session_url: String) -> Result(String, DriveError) {
+  case uri.parse(session_url) {
+    Ok(parsed) ->
+      case parsed.scheme, parsed.host {
+        Some("https"), Some(host) ->
+          case
+            host == "googleapis.com"
+            || string.ends_with(host, ".googleapis.com")
+          {
+            True -> Ok(session_url)
+            False ->
+              Error(UnexpectedPayload("session URI host not on googleapis.com"))
+          }
+        _, _ -> Error(UnexpectedPayload("session URI must be https googleapis"))
+      }
+    Error(Nil) -> Error(UnexpectedPayload("unparseable session URI"))
   }
 }
 

@@ -101,6 +101,22 @@ pub fn renaming_patches_name_and_swaps_parents_test() {
   assert list.key_find(params, "removeParents") == Ok("id-old-parent")
 }
 
+// PENTEST — file_id is Drive metadata used in files/{id} on MUTATING calls.
+// A crafted id must be percent-encoded so it cannot inject query params (e.g.
+// smuggling addParents/removeParents into a trash) or walk the path.
+pub fn a_crafted_file_id_is_percent_encoded_on_mutations_test() {
+  let inbox = process.new_subject()
+  let send = respond_with(inbox, 200, "{\"id\":\"x\",\"trashed\":true}")
+  let evil = "victim?addParents=attacker&removeParents=root"
+  let _ = mutate.trash_file(send, access_token: "at-1", file_id: evil)
+  let assert Ok(sent) = process.receive(inbox, 100)
+  assert !string.contains(sent.path, "?addParents=")
+  assert string.contains(
+    sent.path,
+    "/drive/v3/files/victim%3FaddParents%3Dattacker",
+  )
+}
+
 pub fn a_refused_mutation_reports_status_test() {
   let inbox = process.new_subject()
   let send = respond_with(inbox, 403, "quota")

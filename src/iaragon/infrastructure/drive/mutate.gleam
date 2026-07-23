@@ -7,6 +7,7 @@ import gleam/http
 import gleam/http/request.{type Request}
 import gleam/json
 import gleam/result
+import gleam/uri
 import iaragon/infrastructure/drive/changes.{
   type ChangedFile, type DriveError, type SendRequest, RefusedByServer,
   TransportFailed, UnexpectedPayload,
@@ -53,7 +54,7 @@ pub fn rename_file(
     build_json_request(
       access_token,
       http.Patch,
-      "/drive/v3/files/" <> file_id,
+      "/drive/v3/files/" <> uri.percent_encode(file_id),
       json.object([#("name", json.string(new_name))]),
     )
     |> request.set_query([
@@ -76,7 +77,7 @@ pub fn trash_file(
     build_json_request(
       access_token,
       http.Patch,
-      "/drive/v3/files/" <> file_id,
+      "/drive/v3/files/" <> uri.percent_encode(file_id),
       json.object([#("trashed", json.bool(True))]),
     )
   use _body <- result.try(fetch_ok_body(send, request))
