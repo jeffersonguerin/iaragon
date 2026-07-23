@@ -80,6 +80,7 @@ fn a_pool_config(
     export_to_disk: fn(_file_id, _export_mime, _destination) {
       panic as "no export expected in this test"
     },
+    signal_status: fn(_path, _status) { Nil },
     settle_upload: fn(_path, _outcome) { Nil },
     settle_trash: fn(_file_id, _outcome) { Nil },
     settle_conflict: fn(_path, _outcome) { Nil },
@@ -274,6 +275,88 @@ pub fn deleting_locally_removes_the_file_and_forgets_it_test() {
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") == None })
   assert simplifile.is_file(root <> "/old.txt") == Ok(False)
+}
+
+pub fn a_download_signals_syncing_then_synced_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let statuses = process.new_subject()
+  let root = scratch_dir <> "/signal-download"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, a_working_fetch()),
+      signal_status: fn(path, status) {
+        process.send(statuses, #(path, status))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(a_remote("id-1", "docs/report.txt")),
+  )
+
+  assert process.receive(statuses, 1000)
+    == Ok(#("docs/report.txt", entry.Syncing))
+  assert process.receive(statuses, 1000)
+    == Ok(#("docs/report.txt", entry.Synced))
+}
+
+pub fn an_upload_signals_syncing_then_synced_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let statuses = process.new_subject()
+  let root = scratch_dir <> "/signal-upload"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      upload_to_drive: fn(_target, _source, _size) {
+        Ok(an_uploaded_file("id-up", "mine.txt"))
+      },
+      settle_upload: fn(_path, _outcome) { Nil },
+      signal_status: fn(path, status) {
+        process.send(statuses, #(path, status))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")),
+  )
+
+  assert process.receive(statuses, 1000) == Ok(#("mine.txt", entry.Syncing))
+  assert process.receive(statuses, 1000) == Ok(#("mine.txt", entry.Synced))
+}
+
+pub fn a_local_move_repaints_the_destination_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let statuses = process.new_subject()
+  let root = scratch_dir <> "/signal-move"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/old.txt", contents: "bytes")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      signal_status: fn(path, status) {
+        process.send(statuses, #(path, status))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueMoveLocal(
+      a_known_at("id-1", "renamed.txt"),
+      from: "old.txt",
+    ),
+  )
+
+  // A plain rename drops gvfs metadata, so the destination is repainted.
+  assert process.receive(statuses, 1000) == Ok(#("renamed.txt", entry.Synced))
 }
 
 pub fn deleting_an_empty_directory_removes_and_forgets_it_test() {

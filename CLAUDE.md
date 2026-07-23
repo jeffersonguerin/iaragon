@@ -141,7 +141,9 @@ de arquivos.
 3. Bidirecional com detecção de conflito
 4. Overlays no gerenciador de arquivos
 
-**SYNC BIDIRECIONAL COMPLETO, com resolução de conflito e watcher local.**
+**AS 4 FASES DO ROADMAP ENTREGUES**: sync bidirecional com resolução de
+conflito, watcher local por inotify (fallback polling) e overlays de
+status via GVfs metadata (file managers GTK).
 
 Fase conflitos + watcher (sessão 6): política decidida pelo usuário —
 **edit-edit e both-created divergente viram cópia conflitada** estilo Dropbox
@@ -293,8 +295,28 @@ caminho inotify prova a origem do evento com polling de 1 h e é no-op em
 máquina sem inotify-tools (lá roda o caminho polly, que tem teste
 próprio).
 
-**Próximas sessões**: overlays de file manager, re-export ao trocar
-`NativeDocPolicy`.
+Fase overlays (sessão 12): **emblemas de status no file manager via GVfs
+metadata** — `gio set -t stringv <arquivo> metadata::emblems <emblema>`,
+que Nautilus/Nemo/Caja renderizam no ícone SEM extensão C/Python.
+`entry.SyncStatus` (`Syncing | Synced`) no domínio; o pool ganha
+`signal_status` injetado e sinaliza Syncing no início de
+download/upload e Synced no funil `record_known` (e no move local —
+rename dropa gvfs metadata, o destino é re-pintado).
+`infrastructure/fs/emblems`: `paint_status` (runner injetado; emblemas
+`emblem-synchronizing`/`emblem-default`), `detect_emblem_support` (sonda
+com um SET REAL num arquivo — o gio pode existir sem gvfsd-metadata, só
+a escrita de verdade diferencia) e `build_status_painter` (no-op
+silencioso em máquina sem suporte — emblema é decoração, nunca falha
+transferência). FFI `run_command` roda executável SEM shell
+(spawn_executable + vetor de args — path com espaço/aspas não injeta).
+Limitações: Dolphin/KDE não lê gvfs metadata (precisaria de adapter
+próprio); aparência/existência dos emblemas depende do tema de ícones;
+sem emblema de conflito (conflito se resolve em cópia, não é estado
+persistente).
+
+**Próximas sessões**: re-export ao trocar `NativeDocPolicy`, adapter de
+overlay para Dolphin/KDE, emblema de erro para transferências que
+esgotam retries.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

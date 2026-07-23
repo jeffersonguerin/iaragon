@@ -97,6 +97,9 @@ pub type TransferConfig {
       Result(ChangedFile, String),
     /// (file_id, export mime, absolute destination) — native-doc export.
     export_to_disk: fn(String, String, String) -> Result(Nil, String),
+    /// (relative path, status) — user-visible sync-state signal (file
+    /// manager emblems). Decoration only: failures never fail a transfer.
+    signal_status: fn(String, entry.SyncStatus) -> Nil,
     /// Outcome feedback into the reconciler (path / file_id keyed).
     settle_upload: fn(String, Result(RemoteSighting, String)) -> Nil,
     settle_trash: fn(String, Result(Nil, String)) -> Nil,
@@ -245,7 +248,11 @@ fn run_move_local(
     }
   }
   case moved {
-    Ok(Nil) -> process.send(config.state_owner, state_owner.PutKnown(updated))
+    Ok(Nil) -> {
+      process.send(config.state_owner, state_owner.PutKnown(updated))
+      // A plain rename drops gvfs metadata: repaint the destination.
+      config.signal_status(updated.path, entry.Synced)
+    }
     Error(_reason) -> Nil
   }
 }
@@ -409,6 +416,7 @@ fn run_download(
   remote: RemoteFile,
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
+  state.config.signal_status(remote.path, entry.Syncing)
   case materialize(state.config, remote) {
     Ok(Nil) -> {
       record_downloaded(state.config, remote)
@@ -492,6 +500,7 @@ fn run_upload(
   plan: UploadPlan,
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
+  state.config.signal_status(plan.local.path, entry.Syncing)
   case
     ensure_remote_folders_for(
       state,
@@ -666,6 +675,8 @@ fn record_known(
       kind: kind,
     )),
   )
+  // The record IS what makes the file synced — paint it in the same breath.
+  config.signal_status(path, entry.Synced)
 }
 
 fn describe_error(

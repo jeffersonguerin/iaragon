@@ -47,6 +47,7 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
         },
       ),
       native_policy: entry.LinkFile,
+      signal_status: fn(_path, _status) { Nil },
     )
 
   // No page token yet, so the first poll bootstraps one through the tree:

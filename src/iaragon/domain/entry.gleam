@@ -64,6 +64,14 @@ pub type NativeDocPolicy {
   ExportOdf
 }
 
+/// The user-visible sync state of a mirrored path: a transfer in flight, or
+/// bytes settled on both sides. Presentation adapters (file-manager
+/// emblems…) translate this into whatever their medium shows.
+pub type SyncStatus {
+  Syncing
+  Synced
+}
+
 pub fn default_native_doc_policy() -> NativeDocPolicy {
   LinkFile
 }

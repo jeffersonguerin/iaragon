@@ -26,6 +26,7 @@ import iaragon/infrastructure/drive/mutate
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/drive/upload
+import iaragon/infrastructure/fs/emblems
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
 import simplifile
@@ -37,13 +38,15 @@ pub fn main() -> Nil {
   let assert Ok(db) = state_db.open(data_dir <> "/state.db")
 
   let config_dir = home <> "/.config/iaragon"
+  let mirror_root = home <> "/GoogleDrive"
   let assert Ok(daemon) =
     supervision.start_daemon(
       store: state_db.build_state_store(db),
       drive: build_drive_port(config_dir),
-      mirror_root: home <> "/GoogleDrive",
+      mirror_root: mirror_root,
       transfers: build_transfer_ops(config_dir),
       native_policy: entry.default_native_doc_policy(),
+      signal_status: emblems.build_status_painter(mirror_root),
     )
   // Kick the pipeline: seed on the first cycle, then poll every interval.
   process.send(daemon.remote_poller, remote_poller.Poll)

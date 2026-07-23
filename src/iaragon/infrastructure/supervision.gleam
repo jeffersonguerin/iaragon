@@ -65,6 +65,7 @@ pub fn start_daemon(
   mirror_root mirror_root: String,
   transfers transfers: transfer_pool.DriveTransferOps,
   native_policy native_policy: entry.NativeDocPolicy,
+  signal_status signal_status: fn(String, entry.SyncStatus) -> Nil,
 ) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
   let local_watcher_name = process.new_name(prefix: "local_watcher")
@@ -92,6 +93,7 @@ pub fn start_daemon(
       trash_remote: transfers.trash_remote,
       rename_remote: transfers.rename_remote,
       export_to_disk: transfers.export_to_disk,
+      signal_status: signal_status,
       settle_upload: fn(path, outcome) {
         process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
       },
