@@ -1,0 +1,23 @@
+#!/bin/sh
+# Local CI: no commit lands without a green suite (project rule made
+# mechanical). Ordered by cost: formatting first, then the test run (which
+# also compiles everything). Bypass for emergencies: git commit --no-verify.
+set -eu
+
+if ! command -v gleam >/dev/null 2>&1; then
+  echo "pre-commit: 'gleam' not found in PATH." >&2
+  echo "pre-commit: this project needs Gleam + Erlang/OTP >= 26 (see README)." >&2
+  exit 1
+fi
+
+echo "pre-commit: gleam format --check"
+if ! gleam format --check src test; then
+  echo "pre-commit: unformatted code. Run: gleam format src test" >&2
+  exit 1
+fi
+
+echo "pre-commit: gleam test"
+if ! gleam test; then
+  echo "pre-commit: test suite is red — commit refused." >&2
+  exit 1
+fi

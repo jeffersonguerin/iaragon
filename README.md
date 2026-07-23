@@ -57,6 +57,16 @@ socket binds at `$XDG_RUNTIME_DIR/iaragon.sock` (or
 
 ## Development
 
+One-time setup — points git at the versioned hooks (local CI):
+
+```sh
+./scripts/setup-dev.sh
+```
+
+The `pre-commit` hook refuses any commit that is unformatted or has a red
+suite, making the project rule — every commit green — mechanical.
+Emergency bypass: `git commit --no-verify`.
+
 Strict TDD; the suite is the specification:
 
 ```sh
