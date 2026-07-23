@@ -128,16 +128,43 @@ pub fn transport_failure_is_reported_test() {
     == Error(oauth.TransportFailed("econnrefused"))
 }
 
-pub fn server_refusal_carries_status_and_body_test() {
+pub fn server_refusal_reports_only_the_status_test() {
   let inbox = process.new_subject()
   let send = respond_with(inbox, 400, "{\"error\":\"invalid_grant\"}")
   assert oauth.refresh_access_token(send, a_client(), refresh_token: "rt-1")
-    == Error(oauth.RefusedByServer(400, "{\"error\":\"invalid_grant\"}"))
+    == Error(oauth.RefusedByServer(400))
 }
 
 pub fn unparseable_success_body_is_reported_test() {
   let inbox = process.new_subject()
   let send = respond_with(inbox, 200, "not json")
   assert oauth.refresh_access_token(send, a_client(), refresh_token: "rt-1")
-    == Error(oauth.UnexpectedPayload("not json"))
+    == Error(oauth.UnexpectedPayload)
+}
+
+// PENTEST — a token-endpoint response can carry live access/refresh tokens
+// even when it fails to decode (200 missing expires_in, or a non-200 error
+// body). None of it may survive into the OauthError, which the login command
+// string.inspect's to stderr.
+pub fn a_token_bearing_body_does_not_leak_into_the_error_test() {
+  let inbox = process.new_subject()
+  let leaky = "{\"access_token\":\"ya29.SECRET-LIVE-TOKEN\"}"
+  let send = respond_with(inbox, 200, leaky)
+  let outcome =
+    oauth.refresh_access_token(send, a_client(), refresh_token: "rt-1")
+  assert outcome == Error(oauth.UnexpectedPayload)
+  assert !string.contains(string.inspect(outcome), "SECRET-LIVE-TOKEN")
+}
+
+// PENTEST — an astronomical expires_in must be clamped, or auto-refresh
+// never fires and sync silently stalls once the real ~1h token dies.
+pub fn an_absurd_expires_in_is_clamped_test() {
+  let inbox = process.new_subject()
+  let payload =
+    "{\"access_token\":\"at-1\",\"expires_in\":1000000000000000000,"
+    <> "\"token_type\":\"Bearer\"}"
+  let send = respond_with(inbox, 200, payload)
+  let assert Ok(response) =
+    oauth.refresh_access_token(send, a_client(), refresh_token: "rt-1")
+  assert response.expires_in_seconds <= 86_400
 }

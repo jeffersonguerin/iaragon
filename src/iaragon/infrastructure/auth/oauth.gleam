@@ -32,8 +32,13 @@ pub type TokenResponse {
 
 pub type OauthError {
   TransportFailed(reason: String)
-  RefusedByServer(status: Int, body: String)
-  UnexpectedPayload(body: String)
+  // No response body is retained: a token-endpoint response — even an error
+  // or an undecodable 200 — can carry live access/refresh tokens, and this
+  // error is string.inspect'd by the login command. An HTTP status is enough
+  // to identify the failure. (Same payload-free discipline as token_store's
+  // Corrupted.)
+  RefusedByServer(status: Int)
+  UnexpectedPayload
 }
 
 /// The HTTP transport, injected so tests never touch the network.
@@ -115,9 +120,15 @@ fn request_tokens(
   use response <- result.try(send(request) |> result.map_error(TransportFailed))
   case response.status {
     200 -> parse_token_payload(response.body)
-    status -> Error(RefusedByServer(status, response.body))
+    status -> Error(RefusedByServer(status))
   }
 }
+
+/// Access tokens live ~1h; anything past a day is clamped. A hostile/buggy
+/// endpoint reporting an astronomical expires_in would otherwise pin the
+/// token as "never expiring", so auto-refresh never fires and sync silently
+/// stalls once the real token dies.
+const max_token_lifetime_seconds = 86_400
 
 fn parse_token_payload(body: String) -> Result(TokenResponse, OauthError) {
   let decoder = {
@@ -127,13 +138,17 @@ fn parse_token_payload(body: String) -> Result(TokenResponse, OauthError) {
       None,
       decode.optional(decode.string),
     )
-    use expires_in_seconds <- decode.field("expires_in", decode.int)
+    use expires_in_raw <- decode.field("expires_in", decode.int)
     decode.success(TokenResponse(
       access_token:,
       refresh_token:,
-      expires_in_seconds:,
+      expires_in_seconds: int.clamp(
+        expires_in_raw,
+        0,
+        max_token_lifetime_seconds,
+      ),
     ))
   }
   json.parse(from: body, using: decoder)
-  |> result.replace_error(UnexpectedPayload(body))
+  |> result.replace_error(UnexpectedPayload)
 }
