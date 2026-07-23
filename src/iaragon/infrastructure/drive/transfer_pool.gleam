@@ -32,6 +32,7 @@ import iaragon/domain/entry.{
   type NativeDocPolicy, type RemoteFile, Blob, Folder, GoogleNative, KnownFile,
   Shortcut,
 }
+import iaragon/domain/link_file
 import iaragon/domain/native_docs
 import iaragon/domain/paths
 import iaragon/infrastructure/drive/changes.{type ChangedFile}
@@ -554,18 +555,12 @@ fn materialize(
 fn write_link_file(
   destination: String,
   name: String,
-  file_id: String,
+  target_id: String,
 ) -> Result(Nil, String) {
-  let contents =
-    "[Desktop Entry]\n"
-    <> "Type=Link\n"
-    <> "Name="
-    <> name
-    <> "\n"
-    <> "URL=https://drive.google.com/open?id="
-    <> file_id
-    <> "\n"
-  simplifile.write(to: destination, contents: contents) |> describe_error
+  // The name and target id are untrusted Drive metadata; link_file.build
+  // escapes them so a crafted name cannot inject Desktop Entry keys.
+  simplifile.write(to: destination, contents: link_file.build(name, target_id))
+  |> describe_error
 }
 
 fn record_downloaded(config: TransferConfig, remote: RemoteFile) -> Nil {
