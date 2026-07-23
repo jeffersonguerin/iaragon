@@ -349,6 +349,51 @@ Syncing/Synced — falha é estado transitório visível, não terminal.
 
 **Backlog zerado.** Próximo trabalho novo = decisão de produto nova.
 
+Fase hardening (sessão 15): revisão adversarial em 3 frentes (segurança,
+OTP/concorrência, segurança de dados) via subagentes; achados verificados
+por leitura antes de corrigir, cada fix com TDD. Corrigido:
+- **Path traversal (crítico)**: nome remoto `..`/`.`/`""` escapava do
+  espelho (`root_dir <> "/" <> path`). `paths.sanitize_segment` neutraliza
+  os três com `_` à frente; `/` já virava `_`.
+- **Poller auto-start (crítico)**: só o `main` mandava `Poll` (uma vez);
+  um crash do poller parava o sync remoto→local para sempre. Agora
+  `new_with_initialiser` manda `Poll` a si no boot E em todo restart.
+- **Scan não segue symlinks (alto)**: `get_files` seguia links
+  (exfiltração de fora do espelho; ciclo = loop infinito). Travessia
+  própria com `link_info` (lstat), pula symlink/special.
+- **Segredos (alto)**: `Corrupted` sem payload (não vaza token/secret em
+  `string.inspect`); `tokens.json` via temp+rename 0600, dir 0700.
+- **Corrida upload (alto)**: `record` de upload usa size/mtime do SCAN, não
+  stat pós-transferência — edição no meio do upload re-sobe na rodada
+  seguinte em vez de congelar remoto corrompido como synced.
+- **Delete não-recursivo (alto)**: branch de arquivo usa `delete_file`
+  (não `delete`, que é recursivo) — kind drift não vira wipe de árvore.
+- **Rename de pasta (alto)**: pasta nunca entra no conjunto `vanished` de
+  `infer_local_renames` (o scan não lista dirs, então parecia sempre
+  sumida e podia renomear a pasta remota inteira sobre um arquivo novo de
+  assinatura coincidente).
+- **Socket (médio)**: `chmod 0600` no bind (protocolo revela paths do
+  espelho) + `{packet_size, 4096}` (linha ilimitada = OOM).
+- **Supervisão (médio)**: `restart_tolerance(10, 30)` (default 2/5 s
+  derrubava o daemon numa cascata a partir de 1 erro transitório de SQLite);
+  scan pula entrada com lstat falho (não crasha a rodada); reconciler sem
+  modelo pede `Reseed` em gatilho local (não só em ApplyRemoteChanges).
+
+Residuais rastreados (não perda-de-dados silenciosa; documentados):
+- **Recheck antes de delete/download destrutivo**: um arquivo editado ENTRE
+  a decisão e a execução (fila serial do pool) pode ser apagado/sobrescrito
+  sem virar conflito — o correto seria re-verificar size/mtime vs known
+  imediatamente antes da operação (exige passar a metadata esperada nos
+  comandos). Mitigado hoje: janela normalmente curta.
+- **infer_local_renames sem verificação de CONTEÚDO**: dois arquivos
+  não-relacionados com size+mtime idênticos (raro) podem parear e renomear
+  o remoto errado; a verificação exigiria hash (I/O) fora do domínio puro.
+- **OTP best-effort**: `signal_status`/`locate_known` podem derrubar
+  pool/board se o alvo estiver reiniciando (send a nome não-registrado
+  explode no remetente); e `pending_*` do reconciler não são limpos no DOWN
+  do pool. Ambos mitigados pela tolerância de restart; fix pleno pede
+  rescue via FFI e monitor.
+
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
 exata usada no parser (incl. `shortcutDetails(targetId)`); um redirect OAuth sem `code`/`error` é malformado, e

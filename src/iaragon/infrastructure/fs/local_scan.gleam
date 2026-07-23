@@ -36,8 +36,7 @@ fn walk(dir: String, root_dir: String) -> Result(List(LocalFile), String) {
     // would crash the reconciler and drop its model + pending sets).
     case simplifile.link_info(full) {
       Error(_) -> Ok(acc)
-      Ok(info) ->
-        entry_of(info, full, root_dir, acc)
+      Ok(info) -> entry_of(info, full, root_dir, acc)
     }
   })
 }
@@ -49,28 +48,28 @@ fn entry_of(
   acc: List(LocalFile),
 ) -> Result(List(LocalFile), String) {
   case simplifile.file_info_type(info) {
-      // Never follow a symlink (exfiltration / cycle) and never mirror a
-      // socket/device.
-      simplifile.Symlink | simplifile.Other -> Ok(acc)
-      simplifile.Directory -> {
-        use nested <- result.try(walk(full, root_dir))
-        Ok(list.append(acc, nested))
-      }
-      simplifile.File ->
-        case string.ends_with(full, partial_suffix) {
-          True -> Ok(acc)
-          False ->
-            Ok([
-              LocalFile(
-                path: strip_root(full, root_dir),
-                size: info.size,
-                mtime_seconds: info.mtime_seconds,
-                md5: None,
-              ),
-              ..acc
-            ])
-        }
+    // Never follow a symlink (exfiltration / cycle) and never mirror a
+    // socket/device.
+    simplifile.Symlink | simplifile.Other -> Ok(acc)
+    simplifile.Directory -> {
+      use nested <- result.try(walk(full, root_dir))
+      Ok(list.append(acc, nested))
     }
+    simplifile.File ->
+      case string.ends_with(full, partial_suffix) {
+        True -> Ok(acc)
+        False ->
+          Ok([
+            LocalFile(
+              path: strip_root(full, root_dir),
+              size: info.size,
+              mtime_seconds: info.mtime_seconds,
+              md5: None,
+            ),
+            ..acc
+          ])
+      }
+  }
 }
 
 fn strip_root(path: String, root_dir: String) -> String {
