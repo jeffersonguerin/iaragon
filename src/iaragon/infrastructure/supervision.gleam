@@ -239,6 +239,11 @@ pub fn start_daemon(
   }
 
   static_supervisor.new(static_supervisor.OneForOne)
+  // The default tolerance (2 restarts / 5 s) is far too tight for a tree
+  // where a single state_owner hiccup can cascade a few dependent restarts:
+  // one transient SQLite error under load could otherwise terminate the
+  // whole daemon. Allow real recovery headroom.
+  |> static_supervisor.restart_tolerance(intensity: 10, period: 30)
   |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
   // The board must be registered before anything signals transfers to it.
   |> static_supervisor.add(status_board.supervised(

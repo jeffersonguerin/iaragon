@@ -290,7 +290,14 @@ fn handle_command(
 fn run_round_if_seeded(state: State) -> State {
   case state.root_id {
     Some(_root) -> run_round(state)
-    None -> state
+    // Restarted with no model: a local trigger (watcher ReconcileNow) or a
+    // stale settle has nothing to reconcile against. Ask the poller to
+    // reseed — otherwise local edits sit unsynced until an unrelated remote
+    // change happens to arrive. Reseed is idempotent and stops once seeded.
+    None -> {
+      state.config.request_seed()
+      state
+    }
   }
 }
 

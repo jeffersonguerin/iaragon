@@ -448,6 +448,19 @@ pub fn a_pure_native_rename_still_moves_locally_test() {
   assert updated.path == "plan.desktop"
 }
 
+pub fn a_local_trigger_while_unseeded_requests_a_reseed_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+
+  // The actor was restarted and lost its model; a watcher ReconcileNow must
+  // ask the poller to reseed, otherwise local edits are ignored until some
+  // unrelated remote change happens to arrive.
+  process.send(sut, reconciler.ReconcileNow)
+
+  assert process.receive(dispatches, 1000) == Ok(SeedRequested)
+}
+
 pub fn changes_arriving_before_the_seed_request_a_reseed_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let dispatches = process.new_subject()

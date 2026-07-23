@@ -31,8 +31,24 @@ fn walk(dir: String, root_dir: String) -> Result(List(LocalFile), String) {
   list.try_fold(names, [], fn(acc, name) {
     let full = dir <> "/" <> name
     // lstat: a symlink reports as Symlink here instead of its target's type.
-    use info <- result.try(simplifile.link_info(full) |> describe_error)
-    case simplifile.file_info_type(info) {
+    // A file the user deletes between read_directory and here just vanishes
+    // from this scan — skip it rather than failing the whole round (which
+    // would crash the reconciler and drop its model + pending sets).
+    case simplifile.link_info(full) {
+      Error(_) -> Ok(acc)
+      Ok(info) ->
+        entry_of(info, full, root_dir, acc)
+    }
+  })
+}
+
+fn entry_of(
+  info: simplifile.FileInfo,
+  full: String,
+  root_dir: String,
+  acc: List(LocalFile),
+) -> Result(List(LocalFile), String) {
+  case simplifile.file_info_type(info) {
       // Never follow a symlink (exfiltration / cycle) and never mirror a
       // socket/device.
       simplifile.Symlink | simplifile.Other -> Ok(acc)
@@ -55,7 +71,6 @@ fn walk(dir: String, root_dir: String) -> Result(List(LocalFile), String) {
             ])
         }
     }
-  })
 }
 
 fn strip_root(path: String, root_dir: String) -> String {
