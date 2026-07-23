@@ -19,6 +19,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/timestamp
+import iaragon/application/onboarding
 import iaragon/infrastructure/auth/client_store
 import iaragon/infrastructure/auth/loopback
 import iaragon/infrastructure/auth/oauth
@@ -48,19 +49,23 @@ fn run_login() -> Result(String, String) {
       "cannot restrict " <> config_dir <> " (" <> string.inspect(cause) <> ")"
     }),
   )
+  let client_path = config_dir <> "/oauth_client.json"
   use client <- result.try(
-    client_store.load_client(config_dir <> "/oauth_client.json")
+    client_store.load_client(client_path)
     |> result.map_error(fn(error) {
       case error {
-        client_store.Unreadable(cause) ->
-          "cannot read "
-          <> config_dir
-          <> "/oauth_client.json ("
-          <> string.inspect(cause)
-          <> "). Create it with your Desktop-app client_id and client_secret."
+        // First run: no client yet. Print the full walkthrough — the login
+        // is the front door, so it carries the whole setup.
+        client_store.Unreadable(_) -> {
+          io.println("")
+          io.println(onboarding.describe_missing_client(client_path))
+          "no OAuth client configured — follow the steps above"
+        }
         client_store.Corrupted ->
-          config_dir
-          <> "/oauth_client.json must be JSON with client_id and client_secret"
+          client_path
+          <> " exists but is not the expected JSON — it must be shaped "
+          <> "exactly {\"client_id\": \"...\", \"client_secret\": \"...\"} "
+          <> "(the values come from your Google Cloud \"Desktop app\" client)"
       }
     }),
   )

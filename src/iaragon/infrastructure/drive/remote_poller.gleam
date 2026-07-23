@@ -60,6 +60,10 @@ pub type PollerConfig {
     deliver: Subject(reconciler.Command),
     poll_interval_ms: Int,
     pick_retry_delay_ms: fn(Int) -> Int,
+    /// One line when a failure streak starts, one when it ends — loud enough
+    /// for the journal to explain a stalled sync (dead credential, network
+    /// down), quiet enough to never spam at one line per retry.
+    report_trouble: fn(String) -> Nil,
   )
 }
 
@@ -134,7 +138,7 @@ fn handle_command(
       }
       case outcome {
         Advanced -> continue_after_success(state)
-        Transient -> continue_after_backoff(state)
+        Transient(reason) -> continue_after_backoff(state, reason)
         StaleToken -> recover_stale_token(state)
       }
     }
@@ -145,18 +149,24 @@ fn handle_command(
 /// a rejected page token that forces a re-seed.
 type Outcome {
   Advanced
-  Transient
+  Transient(reason: String)
   StaleToken
 }
 
 fn to_outcome(result: Result(Nil, String)) -> Outcome {
   case result {
     Ok(Nil) -> Advanced
-    Error(_reason) -> Transient
+    Error(reason) -> Transient(reason)
   }
 }
 
 fn continue_after_success(state: State) -> actor.Next(State, Command) {
+  // Close the streak the trouble line opened — the journal reader must see
+  // that the stall ended without diffing timestamps.
+  case state.failed_attempts {
+    0 -> Nil
+    _ -> state.config.report_trouble("remote sync recovered")
+  }
   let timer =
     process.send_after(state.self, state.config.poll_interval_ms, Poll)
   actor.continue(
@@ -169,7 +179,19 @@ fn continue_after_success(state: State) -> actor.Next(State, Command) {
   )
 }
 
-fn continue_after_backoff(state: State) -> actor.Next(State, Command) {
+fn continue_after_backoff(
+  state: State,
+  reason: String,
+) -> actor.Next(State, Command) {
+  // Only the FIRST failure of a streak is reported: the retries that follow
+  // carry no new information and would flood the journal.
+  case state.failed_attempts {
+    0 ->
+      state.config.report_trouble(
+        "remote sync failing: " <> reason <> " (retrying with backoff)",
+      )
+    _ -> Nil
+  }
   let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
   let timer = process.send_after(state.self, delay, Poll)
   actor.continue(
@@ -195,7 +217,7 @@ fn recover_stale_token(state: State) -> actor.Next(State, Command) {
         State(..state, seeded: False, failed_attempts: 0, scheduled_poll: None),
       )
     }
-    Error(_reason) -> continue_after_backoff(state)
+    Error(reason) -> continue_after_backoff(state, reason)
   }
 }
 
@@ -242,7 +264,7 @@ fn advance_changes(config: PollerConfig) -> Outcome {
     process.call(config.state_owner, 5000, state_owner.GetPageToken)
   case config.drive.fetch_all_changes(page_token) {
     Error(StalePageToken) -> StaleToken
-    Error(ChangesFailed(_reason)) -> Transient
+    Error(ChangesFailed(reason)) -> Transient(reason)
     Ok(#(changes, fresh_token)) -> {
       // Deliver BEFORE advancing the token: if the reconciler is momentarily
       // unregistered, keep the token so the changes are re-fetched on retry.
@@ -255,7 +277,7 @@ fn advance_changes(config: PollerConfig) -> Outcome {
           )
       }
       case delivered {
-        Error(_reason) -> Transient
+        Error(reason) -> Transient(reason)
         Ok(Nil) -> {
           process.send(
             config.state_owner,

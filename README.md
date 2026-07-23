@@ -83,9 +83,9 @@ builds on macOS too, but the sync daemon is meant for a Linux desktop.)
 
 ## Running
 
-1. Create a Google Cloud OAuth client of type **Desktop app** and save it
-   as `~/.config/iaragon/oauth_client.json`:
-   `{"client_id": "...", "client_secret": "..."}`
+1. Create your own Google Cloud OAuth client (one-time, 10-15 minutes —
+   see the walkthrough below; running `iaragon-login` with nothing
+   configured prints the same steps).
 2. Log in (loopback + PKCE flow, opens your browser):
 
    ```sh
@@ -107,6 +107,40 @@ builds on macOS too, but the sync daemon is meant for a Linux desktop.)
 State lives in `~/.local/share/iaragon/state.db` (SQLite). The status
 socket binds at `$XDG_RUNTIME_DIR/iaragon.sock` (or
 `~/.local/share/iaragon/status.sock`).
+
+### Creating the OAuth client (one-time)
+
+Google requires every app to register its own OAuth client, and the
+full-drive scope iaragon needs is "restricted": shipping a shared client
+inside iaragon would require Google verification plus a yearly security
+audit. So — like rclone recommends — you create a personal client once;
+it is free and takes 10-15 minutes:
+
+1. Create (or pick) a Google Cloud project:
+   <https://console.cloud.google.com/projectcreate>
+2. Enable the **Google Drive API** for that project:
+   <https://console.cloud.google.com/apis/library/drive.googleapis.com>
+3. Configure the consent screen (app name + your e-mail, user type
+   **External**): <https://console.cloud.google.com/auth/branding>
+4. Create the client — "Create OAuth client" (or Credentials → Create
+   credentials → OAuth client ID), application type **Desktop app**:
+   <https://console.cloud.google.com/auth/clients>
+5. Copy the client ID and secret into
+   `~/.config/iaragon/oauth_client.json`, shaped exactly:
+
+   ```json
+   {"client_id": "...", "client_secret": "..."}
+   ```
+
+6. **Publish the app "In production"** (Audience → Publishing status →
+   Publish app): <https://console.cloud.google.com/auth/audience>
+   Left in "Testing", Google expires your login every 7 days (and you
+   must add yourself as a test user). Publishing shows an "unverified
+   app" warning on the consent screen — expected: it is your own app,
+   used only by you.
+
+The console UI moves around; if a link 404s, search the console for
+"OAuth". The steps and the JSON shape stay the same.
 
 ## Health check
 

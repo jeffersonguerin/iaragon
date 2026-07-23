@@ -201,7 +201,9 @@ fn classify_changes_error(
 fn obtain_access_token(config_dir: String) -> Result(String, String) {
   use client <- result.try(
     client_store.load_client(config_dir <> "/oauth_client.json")
-    |> result.map_error(string.inspect),
+    |> result.map_error(fn(_error) {
+      "no OAuth client configured — run iaragon-login"
+    }),
   )
   token_manager.obtain_access_token(
     token_manager.TokenSource(
@@ -213,7 +215,18 @@ fn obtain_access_token(config_dir: String) -> Result(String, String) {
       },
     ),
   )
-  |> result.map_error(string.inspect)
+  // Human wording here, where the error is born: these strings travel up to
+  // the poller's journal line, which must tell the user what to DO.
+  |> result.map_error(fn(error) {
+    case error {
+      token_manager.MissingLogin(_) -> "not logged in — run iaragon-login"
+      token_manager.RefreshFailed(detail) ->
+        "token refresh failed ("
+        <> detail
+        <> ") — run iaragon-login again; if the app is in \"Testing\" the"
+        <> " login dies every 7 days (publish it \"In production\")"
+    }
+  })
 }
 
 fn send_over_httpc(

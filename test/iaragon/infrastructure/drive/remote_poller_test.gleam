@@ -53,6 +53,7 @@ fn start_poller(
         deliver: deliver,
         poll_interval_ms: poll_interval_ms,
         pick_retry_delay_ms: fn(_attempt) { 25 },
+        report_trouble: fn(_line) { Nil },
       ),
     )
   process.named_subject(name)
@@ -260,4 +261,47 @@ fn wait_for_page_token(
   fakes.retry_until(40, fn() {
     process.call(owner, 500, state_owner.GetPageToken) == expected
   })
+}
+
+pub fn a_failure_streak_is_reported_once_and_so_is_recovery_test() {
+  // The daemon must be LOUD about a broken credential (or any persistent
+  // remote failure) without spamming the journal at one line per retry:
+  // exactly one trouble line when a streak starts, one recovery line when
+  // it ends. The reason travels verbatim (the composition writes the
+  // actionable "run iaragon-login" wording into it).
+  let owner = start_state_owner()
+  let deliver = process.new_subject()
+  let trouble = process.new_subject()
+  let outcomes =
+    fakes.script_outcomes([
+      Error("not logged in — run iaragon-login"),
+      Error("not logged in — run iaragon-login"),
+      Error("not logged in — run iaragon-login"),
+      Ok(#("root-1", [a_sighting("id-1")])),
+    ])
+  let port = DrivePort(..a_port(), fetch_mirror_snapshot: fn() { outcomes() })
+  let name = process.new_name(prefix: "poller_test")
+  let assert Ok(_) =
+    remote_poller.start(
+      name,
+      PollerConfig(
+        drive: port,
+        state_owner: owner,
+        deliver: deliver,
+        poll_interval_ms: idle_interval,
+        pick_retry_delay_ms: fn(_attempt) { 25 },
+        report_trouble: fn(line) { process.send(trouble, line) },
+      ),
+    )
+
+  // Three failures then success — but only TWO lines: streak start + end.
+  let assert Ok(reconciler.SeedMirror("root-1", _)) =
+    process.receive(deliver, 2000)
+  assert process.receive(trouble, 1000)
+    == Ok(
+      "remote sync failing: not logged in — run iaragon-login "
+      <> "(retrying with backoff)",
+    )
+  assert process.receive(trouble, 1000) == Ok("remote sync recovered")
+  assert process.receive(trouble, 100) == Error(Nil)
 }

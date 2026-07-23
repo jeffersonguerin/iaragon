@@ -4,6 +4,7 @@
 
 import gleam/erlang/process.{type Subject}
 import gleam/int
+import gleam/io
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor
@@ -102,6 +103,9 @@ pub fn start_daemon(
       pick_retry_delay_ms: fn(attempt) {
         backoff.compute_delay_ms(attempt, int.random(1000))
       },
+      // stderr reaches the user journal under systemd; the poller only emits
+      // on streak transitions, so this stays journal-friendly.
+      report_trouble: fn(line) { io.println_error("iaragon: " <> line) },
     )
   let reconciler_subject = process.named_subject(reconciler_name)
   let transfer_config =
