@@ -582,6 +582,38 @@ Residual rastreado (documentado, NÃO alcançável no modelo de ameaça):
 
 **Backlog de residuais de segurança zerado** (3 rodadas encerradas).
 
+Fase alinhamento com a API oficial (sessão 19): comparação com o campo
+(rclone bisync/mount, ocamlfuse, Insync, gvfs/KIO, grive) + revisão da doc
+Drive v3 atual. Confirmado que o iaragon é o único desenho FOSS
+daemon+espelho+Changes-API; escolhas validadas (conflito estilo Dropbox,
+SQLite por fileId, nativo-como-link). Corrigido a partir da revisão:
+- **`pageSize=1000` no `changes.list`** (default era 100) — menos requests e
+  quota; `files.list` já usava 1000.
+- **`acknowledgeAbuse=true` no `alt=media`** — arquivo que o Drive marca como
+  abusivo falha o download p/ sempre sem isso; é arquivo do próprio usuário.
+- **Reseed em page token rejeitado**: `changes.list` 400 (invalidPageToken) /
+  410 (gone) agora vira `StalePageToken` (tipo `ChangesError` no `DrivePort`;
+  a composição classifica) → o poller busca um `startPageToken` fresco,
+  sobrescreve o stale e força re-seed completo (pode ter perdido mudanças no
+  gap). Antes: retry infinito com o mesmo token → sync remoto travado.
+- **Notas de doc atualizadas**: `sha1Checksum`/`sha256Checksum` EXISTEM p/
+  blobs (só blobs, como md5) — o parser segue com md5 (suficiente); quota é
+  325k units/min/USUÁRIO **e** 1M/min/PROJETO, com revisão dependente da
+  idade do projeto (2026-05-01) — verificar no Console; `pageSize` máx 1000.
+- **0-byte (U3) mantido como `bytes */0`**: a alternativa doc-blessed
+  (multipart) exigiria um path de upload novo só p/ um caso raro; `*/0` segue
+  a forma documentada `bytes */TOTAL`. Decisão registrada, não é invenção.
+
+**NÃO implementado — edit-back de nativos (bloqueado por segurança de API)**:
+a ideia (estilo Insync: editar o `.docx` exportado re-sincroniza p/ o Drive)
+NÃO é implementável com segurança pela API v3 documentada. `files.update`
+com media num Google Doc **substitui/converte** o conteúdo (a conversão é
+recurso só de `files.create`), arriscando transformar o Doc nativo do
+usuário num blob — perda do status nativo (comentários/colaboração). Viola
+"não inventar API" + "zero perda silenciosa". Decisão de produto pendente
+sobre a alternativa SEGURA (ex.: edição de nativo exportado vira cópia
+conflitada subida como blob novo, sem tocar o Doc).
+
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
 exata usada no parser (incl. `shortcutDetails(targetId)`); um redirect OAuth sem `code`/`error` é malformado, e
