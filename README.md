@@ -34,6 +34,39 @@ of them restarts that actor alone.
 - `inotify-tools` for the inotify watcher (optional; polling fallback)
 - `gcc`/`make` at build time (sqlight's NIF), `rebar3` (filespy's fs dep)
 
+## Install
+
+### curl (Linux)
+
+Builds from source and installs a per-user daemon under `~/.local`. It uses
+your package manager (via `sudo`) only to install missing build tools, and
+bootstraps Gleam/rebar3 if absent. Erlang/OTP ≥ 26 is required at runtime;
+if your distro's Erlang is older, the script stops and tells you how to get
+a newer one rather than installing something that would crash.
+
+```sh
+curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install.sh | sh
+```
+
+Overridable by environment: `IARAGON_REF` (git ref, default `main`),
+`IARAGON_PREFIX` (default `~/.local`), `IARAGON_REPO`, `GLEAM_VERSION`,
+`IARAGON_NO_SUDO=1`.
+
+It installs the `iaragon` (daemon) and `iaragon-login` launchers to
+`~/.local/bin`, plus a systemd **user** unit at
+`~/.config/systemd/user/iaragon.service`.
+
+### Homebrew
+
+Rolling release — no version tags, so the formula is HEAD-only:
+
+```sh
+brew install --HEAD jeffersonguerin/iaragon/iaragon
+```
+
+(The daemon targets Linux; the formula builds on macOS too, but the sync
+daemon is meant for a Linux desktop.)
+
 ## Running
 
 1. Create a Google Cloud OAuth client of type **Desktop app** and save it
@@ -42,14 +75,20 @@ of them restarts that actor alone.
 2. Log in (loopback + PKCE flow, opens your browser):
 
    ```sh
-   gleam run -m iaragon/login
+   iaragon-login          # or, from a source checkout: gleam run -m iaragon/login
    ```
 
-3. Start the daemon:
+3. Start the daemon — supervised as a systemd user service, or in the
+   foreground:
 
    ```sh
-   gleam run
+   systemctl --user enable --now iaragon.service   # supervised
+   iaragon                                          # foreground
+   # from a source checkout: gleam run
    ```
+
+   To keep the daemon running after you log out:
+   `loginctl enable-linger "$USER"`.
 
 State lives in `~/.local/share/iaragon/state.db` (SQLite). The status
 socket binds at `$XDG_RUNTIME_DIR/iaragon.sock` (or

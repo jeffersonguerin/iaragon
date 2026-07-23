@@ -1,0 +1,32 @@
+# systemd *user* unit for the iaragon sync daemon.
+#
+# The installer (install.sh) copies this to
+# ~/.config/systemd/user/iaragon.service, rewriting ExecStart to the real
+# launcher path when a non-default prefix is used. The %h specifier expands
+# to the invoking user's home directory, so the default-prefix install
+# (~/.local) needs no rewrite.
+#
+# Manage it per-user (no root):
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now iaragon.service
+#   journalctl --user -u iaragon -f
+#
+# For the daemon to keep running after you log out:
+#   loginctl enable-linger "$USER"
+
+[Unit]
+Description=iaragon — bidirectional Google Drive sync daemon
+Documentation=https://github.com/jeffersonguerin/iaragon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/iaragon
+# A transient BEAM crash should bring the daemon back; the OTP tree already
+# isolates per-actor failures, so a full exit is rare and worth retrying.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
