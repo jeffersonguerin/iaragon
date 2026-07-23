@@ -85,6 +85,7 @@ pub fn start_daemon(
   native_policy native_policy: entry.NativeDocPolicy,
   signal_status signal_status: fn(String, entry.SyncStatus) -> Nil,
   status_socket_path status_socket_path: String,
+  allow_mass_deletion allow_mass_deletion: Bool,
 ) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
   let local_watcher_name = process.new_name(prefix: "local_watcher")
@@ -221,6 +222,8 @@ pub fn start_daemon(
       native_policy: native_policy,
       round_interval_ms: round_interval_ms,
       today: build_date_stamp,
+      report_trouble: fn(line) { io.println_error("iaragon: " <> line) },
+      allow_mass_deletion: allow_mass_deletion,
     )
 
   let watcher_config =

@@ -64,6 +64,7 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       native_policy: entry.LinkFile,
       signal_status: fn(_path, _status) { Nil },
       status_socket_path: status_sock,
+      allow_mass_deletion: False,
     )
 
   // The poller self-kicks on start and bootstraps a page token through the

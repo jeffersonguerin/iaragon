@@ -789,6 +789,64 @@ aparece; `deep_size_bytes`: `erts_debug:size` do termo). Medido:
 Os benchmarks vivem em `test/iaragon/perf/` e imprimem os números a cada
 run; asserts são canários generosos (propriedades, não micro-tempos).
 
+## Válvulas de segurança de dados (sessão 21, análise final vs concorrentes)
+
+Pesquisa comparativa (rclone bisync, Drive for Desktop, Dropbox, Syncthing —
+docs oficiais) identificou 3 válvulas "table stakes" que faltavam; as 3
+entraram com TDD:
+- **Válvula de mass-delete** (`domain/safety.judge_mass_deletion`): rodada
+  que deletaria ≥10 arquivos E >50% dos knowns tem SÓ as deleções suprimidas
+  (o resto flui); uma linha de journal por streak com a causa provável
+  (espelho desmontado / listing vazio) e o override
+  `IARAGON_ALLOW_MASS_DELETE=1` (o `--force` do bisync, como env). Cobre os
+  DOIS desastres: scan vazio (espelho desmontado → mass trash remoto) e
+  seed falsamente vazio (→ mass wipe local, irrecuperável). bisync aborta
+  em >50% por default pelo mesmo motivo; piso absoluto de 10 deixa
+  espelhos/cleanups pequenos em paz. Renames de pasta grande NÃO disparam
+  (viram Move*, não delete+create — só os ambíguos caem no delete).
+- **Scan falho pula a rodada** (streak de report_trouble) em vez de crashar
+  o reconciler — disco ilegível queimava o restart budget (10/30s) até
+  derrubar o daemon inteiro.
+- **Lixeira local** (`fs/local_trash`): DeleteLocal de BLOB move para
+  `.iaragon-trash/` DENTRO do espelho (mesmo FS = rename atômico; padrão
+  .stversions/.dropbox.cache/--backup-dir — nenhuma ferramenta madura
+  responde a delete remoto com unlink seco), preservando o path relativo,
+  com variantes numeradas em colisão. Falha no move = mantém known,
+  re-tenta. Scan pula o dir por LOCALIZAÇÃO (como `.iaragon-partial/`).
+  Retenção de 30 dias varrida UMA vez no boot (nunca no caminho do sync).
+  Links `.desktop` gerados e dirs vazios seguem delete direto (não são
+  conteúdo do usuário). O reconciler ganhou `report_trouble` +
+  `allow_mass_deletion` no config; `start_daemon` ganhou o parâmetro.
+
+Re-verificação da Drive API (docs oficiais, 2026-07):
+- **`downloadRestrictedForRevision`** (GA jul/2025): dono/organizador pode
+  restringir download até p/ writers — `alt=media` pode falhar PERMANENTE
+  em arquivo legível. Hoje: retry 4x + re-despacho por rodada (SyncFailed
+  visível). RESIDUAL documentado: sem backoff por-arquivo, um arquivo
+  restrito custa ~4 requests/rodada p/ sempre. Fix seria classificar o 403
+  por reason e marcar o file_id como unsyncable — decisão de produto nova.
+- **0-byte `*/0` rebaixado de residual**: a client library do Google
+  (google-resumable-media-python, `_EMPTY_RANGE_TEMPLATE`) faz EXATAMENTE
+  `bytes */0` com corpo vazio — nossa escolha é a convenção do próprio
+  Google, não invenção.
+- **Quota 2026**: além dos 325k units/min/usuário e 1M/min/projeto,
+  há teto DIÁRIO de 400M units/projeto e **1 TB/dia de egress** — limita o
+  primeiro sync de Drives gigantes (>1 TB não desce num dia).
+- **acknowledgeAbuse=true incondicional**: sem erro documentado p/ arquivo
+  não-abusivo (comportamento p/ não-dono é indocumentado); prática do
+  rclone (`--drive-acknowledge-abuse`) confirma seguro. Mantido.
+- **Google Vids**: só baixa via `files.download` (LRO novo), `alt=media`
+  falha — mas Vids é `google-apps.*` sem export de documento → já
+  materializa como LINK em qualquer política (negativo verificado, nada a
+  fazer).
+- **Retry-After**: doc oficial recomenda SÓ backoff exponencial (grep no
+  HTML: zero menções) — nosso backoff+jitter já é exatamente o recomendado.
+- **Refresh 7 dias em Testing**: reconfirmado em 2 páginas oficiais;
+  produção unverified tem warning + cap de 100 novos usuários, SEM
+  expiração de token.
+- **Events API (GA mai/2025)**: alternativa push ao polling de changes —
+  candidato futuro, polling continua suportado sem mudanças.
+
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
 - **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas

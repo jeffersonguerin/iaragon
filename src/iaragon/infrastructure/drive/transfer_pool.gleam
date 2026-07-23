@@ -38,6 +38,7 @@ import iaragon/domain/paths
 import iaragon/infrastructure/drive/changes.{type ChangedFile}
 import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/upload.{type UploadTarget}
+import iaragon/infrastructure/fs/local_trash
 import simplifile
 
 pub type Command {
@@ -230,10 +231,20 @@ fn run_delete_local(config: TransferConfig, known: entry.KnownFile) -> Nil {
       }
     Blob ->
       case blob_still_matches(target, known) {
-        True -> {
-          let _ = simplifile.delete_file(target)
-          True
-        }
+        True ->
+          // User content is never unlinked: it moves into the local trash
+          // (.iaragon-trash/, retention-swept at boot), so a wrong remote
+          // deletion stays recoverable. A failed move keeps the known and
+          // the file; the next round re-decides and retries.
+          case simplifile.is_file(target) {
+            Ok(True) ->
+              case local_trash.move_to_trash(config.root_dir, known.path) {
+                Ok(Nil) -> True
+                Error(_) -> False
+              }
+            // Already gone: nothing to preserve, converge.
+            _ -> True
+          }
         False -> False
       }
     GoogleNative | Shortcut(_) -> {

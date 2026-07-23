@@ -27,6 +27,7 @@ import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/drive/upload
 import iaragon/infrastructure/fs/emblems
+import iaragon/infrastructure/fs/local_trash
 import iaragon/infrastructure/overlay/status_server
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
@@ -49,6 +50,15 @@ pub fn main() -> Nil {
   // user-created dir world-readable.
   let assert Ok(Nil) = client_store.protect_config_dir(config_dir)
   let mirror_root = home <> "/GoogleDrive"
+  // Retention for the local trash (.iaragon-trash/): entries older than 30
+  // days are swept once per boot — never from the sync path.
+  local_trash.sweep(
+    mirror_root,
+    now_unix: timestamp.system_time()
+      |> timestamp.to_unix_seconds
+      |> float.round,
+    retention_seconds: 30 * 86_400,
+  )
   let assert Ok(_daemon) =
     supervision.start_daemon(
       store: state_db.build_state_store(db),
@@ -58,6 +68,10 @@ pub fn main() -> Nil {
       native_policy: entry.default_native_doc_policy(),
       signal_status: emblems.build_status_painter(mirror_root),
       status_socket_path: resolve_status_socket_path(data_dir),
+      // The explicit human override for the mass-deletion valve: a round
+      // that would delete most of the synced files is refused unless the
+      // user restarts with this set (rclone bisync's --force, as an env).
+      allow_mass_deletion: envoy.get("IARAGON_ALLOW_MASS_DELETE") == Ok("1"),
     )
   // The poller self-kicks on start (and on every supervisor restart); the
   // daemon just needs to stay alive.

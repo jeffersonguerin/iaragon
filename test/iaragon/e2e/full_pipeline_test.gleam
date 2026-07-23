@@ -57,6 +57,7 @@ pub fn the_whole_daemon_syncs_both_ways_against_a_fake_drive_test() {
       native_policy: entry.default_native_doc_policy(),
       signal_status: fn(_path, _status) { Nil },
       status_socket_path: "build/test-scratch/e2e-status.sock",
+      allow_mass_deletion: False,
     )
 
   // Remote → local: the self-kicked first cycle seeds and downloads the

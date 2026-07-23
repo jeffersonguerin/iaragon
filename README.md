@@ -19,7 +19,13 @@ of them restarts that actor alone.
 - **Conflicts** become Dropbox-style conflicted copies
   (`name (conflicted copy YYYY-MM-DD).ext`) — both versions survive.
 - **Renames** propagate as renames in both directions (no re-transfer).
-- **Local deletions propagate as trash**, never permanent deletion.
+- **Local deletions propagate as trash**, never permanent deletion — and
+  remote deletions move the mirror copy into `.iaragon-trash/` inside the
+  mirror (30-day retention, swept at daemon start), never a bare unlink.
+- **Mass-deletion valve**: a round that would delete most of the synced
+  files (an unmounted mirror, an empty listing) is refused and reported in
+  the journal instead of executed; override with
+  `IARAGON_ALLOW_MASS_DELETE=1` when a huge cleanup really is intended.
 - **Google-native docs** (Docs/Sheets/Slides) are download-only, by
   policy: browser-link files (default), or real Office/ODF exports.
 - **Local changes** are detected by inotify (fallback: polling) within

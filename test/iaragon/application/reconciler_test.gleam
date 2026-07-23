@@ -1,4 +1,5 @@
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import iaragon/application/reconciler.{
@@ -107,6 +108,8 @@ fn start_reconciler_with_interval(
         native_policy: native_policy,
         round_interval_ms: round_interval_ms,
         today: fn() { "2026-07-22" },
+        report_trouble: fn(_line) { Nil },
+        allow_mass_deletion: False,
       ),
     )
   process.named_subject(name)
@@ -1096,4 +1099,189 @@ pub fn a_pool_crash_clears_in_flight_so_stranded_work_redispatches_test() {
   process.send(sut, reconciler.ReconcileNow)
   let assert [TrashDispatched("id-1")] = receive_transfers(dispatches, 1)
   Nil
+}
+
+fn build_config(
+  owner: Subject(state_owner.Command),
+  dispatches: Subject(Dispatch),
+  scan: fn() -> Result(List(entry.LocalFile), String),
+  trouble: Subject(String),
+  allow_mass_deletion: Bool,
+) -> reconciler.ReconcilerConfig {
+  ReconcilerConfig(
+    state_owner: owner,
+    resolve_pool_pid: fn() { Error(Nil) },
+    dispatch_download: fn(remote, _expected) {
+      process.send(dispatches, DownloadDispatched(remote))
+    },
+    dispatch_delete_local: fn(known: entry.KnownFile) {
+      process.send(dispatches, DeleteLocalDispatched(known.file_id, known.path))
+    },
+    dispatch_upload: fn(plan) {
+      process.send(dispatches, UploadDispatched(plan))
+    },
+    dispatch_trash_remote: fn(file_id) {
+      process.send(dispatches, TrashDispatched(file_id))
+    },
+    dispatch_conflict_copy: fn(remote, copy_path) {
+      process.send(dispatches, ConflictCopyDispatched(remote, copy_path))
+    },
+    dispatch_move_local: fn(updated, from) {
+      process.send(dispatches, MoveLocalDispatched(updated, from))
+    },
+    dispatch_move_remote: fn(plan) {
+      process.send(dispatches, MoveRemoteDispatched(plan))
+    },
+    request_seed: fn() { process.send(dispatches, SeedRequested) },
+    scan_local: scan,
+    hash_local_file: fn(_path) { Ok("aaa") },
+    native_policy: LinkFile,
+    round_interval_ms: idle_round_interval,
+    today: fn() { "2026-07-22" },
+    report_trouble: fn(line) { process.send(trouble, line) },
+    allow_mass_deletion: allow_mass_deletion,
+  )
+}
+
+fn start_reconciler_guarded(
+  owner: Subject(state_owner.Command),
+  dispatches: Subject(Dispatch),
+  locals: List(entry.LocalFile),
+  trouble: Subject(String),
+  allow_mass_deletion: Bool,
+) -> Subject(reconciler.Command) {
+  let name = process.new_name(prefix: "reconciler_test")
+  let assert Ok(_) =
+    reconciler.start(
+      name,
+      build_config(
+        owner,
+        dispatches,
+        fn() { Ok(locals) },
+        trouble,
+        allow_mass_deletion,
+      ),
+    )
+  process.named_subject(name)
+}
+
+// --- mass-deletion valve ---------------------------------------------------
+// An unmounted mirror makes the scan return an EMPTY list; a false-empty
+// seed makes every known look remote-deleted. Either way a single round
+// would wipe one side. The valve suppresses the round's deletions, reports
+// once, and keeps everything non-destructive flowing (rclone bisync's
+// default-on 50% abort, adapted to a daemon).
+
+fn range_1_to(top: Int) -> List(Int) {
+  build_range(top, [])
+}
+
+fn build_range(current: Int, acc: List(Int)) -> List(Int) {
+  case current < 1 {
+    True -> acc
+    False -> build_range(current - 1, [current, ..acc])
+  }
+}
+
+fn twenty_known_files(owner: Subject(state_owner.Command)) -> Nil {
+  list.each(range_1_to(20), fn(n) {
+    process.send(
+      owner,
+      state_owner.PutKnown(KnownFile(
+        file_id: "id-" <> int.to_string(n),
+        path: "file" <> int.to_string(n) <> ".txt",
+        remote_modified_time: "2026-07-01T10:00:00Z",
+        md5: Some("aaa"),
+        size: 42,
+        local_mtime_seconds: 1000,
+        kind: Blob,
+      )),
+    )
+  })
+}
+
+fn twenty_sightings() -> List(reconciler.RemoteSighting) {
+  list.map(range_1_to(20), fn(n) {
+    a_sighting(
+      "id-" <> int.to_string(n),
+      "file" <> int.to_string(n) <> ".txt",
+      "root-1",
+    )
+  })
+}
+
+pub fn an_empty_scan_cannot_mass_trash_the_drive_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  twenty_known_files(owner)
+  let dispatches = process.new_subject()
+  let trouble = process.new_subject()
+  // Locals EMPTY: the unmounted-mirror shape. Without the valve this round
+  // dispatches twenty EnqueueTrashRemote.
+  let reconciler_subject =
+    start_reconciler_guarded(owner, dispatches, [], trouble, False)
+  process.send(
+    reconciler_subject,
+    reconciler.SeedMirror("root-1", twenty_sightings()),
+  )
+
+  // One loud line, no destructive dispatch at all.
+  let assert Ok(line) = process.receive(trouble, 2000)
+  assert line
+    == "mass deletion valve: this round would delete 20 of 20 synced files —"
+    <> " deletions suppressed (unmounted mirror or empty listing? set"
+    <> " IARAGON_ALLOW_MASS_DELETE=1 and restart if this is intended)"
+  assert expect_no_transfers(dispatches)
+  // Only the FIRST round of the streak reports; the next stays quiet.
+  process.send(reconciler_subject, reconciler.ReconcileNow)
+  assert process.receive(trouble, 500) == Error(Nil)
+}
+
+pub fn the_override_lets_a_mass_deletion_through_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  twenty_known_files(owner)
+  let dispatches = process.new_subject()
+  let trouble = process.new_subject()
+  let reconciler_subject =
+    start_reconciler_guarded(owner, dispatches, [], trouble, True)
+  process.send(
+    reconciler_subject,
+    reconciler.SeedMirror("root-1", twenty_sightings()),
+  )
+
+  let transfers = receive_transfers(dispatches, 20)
+  assert list.length(transfers) == 20
+  assert process.receive(trouble, 300) == Error(Nil)
+}
+
+pub fn a_failed_scan_skips_the_round_instead_of_crashing_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let trouble = process.new_subject()
+  let name = process.new_name(prefix: "reconciler_test")
+  let assert Ok(_) =
+    reconciler.start(
+      name,
+      build_config(
+        owner,
+        dispatches,
+        fn() { Error("mirror scan exploded") },
+        trouble,
+        False,
+      ),
+    )
+  let reconciler_subject = process.named_subject(name)
+  process.send(
+    reconciler_subject,
+    reconciler.SeedMirror("root-1", [a_sighting("id-1", "a.txt", "root-1")]),
+  )
+
+  // The round is skipped with one line — not an actor crash (which would
+  // burn restart budget every 30s while a disk stays unreadable).
+  let assert Ok(line) = process.receive(trouble, 2000)
+  assert line == "local scan failed: mirror scan exploded — skipping this round"
+  assert expect_no_transfers(dispatches)
+  assert process.subject_owner(reconciler_subject) != Error(Nil)
+  // Still failing on the next round: the streak reported once, stays quiet.
+  process.send(reconciler_subject, reconciler.ReconcileNow)
+  assert process.receive(trouble, 500) == Error(Nil)
 }

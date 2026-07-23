@@ -25,6 +25,11 @@ import simplifile
 /// that merely ends in this string is no longer hidden.
 const partial_dir_name = ".iaragon-partial"
 
+/// Reserved directory (at any level, in practice the root) holding locally
+/// trashed mirror copies — the recovery net for remote deletions. Skipped
+/// by LOCATION like the partial dir, so its contents are never re-uploaded.
+const trash_dir_name = ".iaragon-trash"
+
 pub fn scan_mirror(root_dir: String) -> Result(List(LocalFile), String) {
   use Nil <- result.try(
     simplifile.create_directory_all(root_dir) |> describe_error,
@@ -35,8 +40,9 @@ pub fn scan_mirror(root_dir: String) -> Result(List(LocalFile), String) {
 fn walk(dir: String, root_dir: String) -> Result(List(LocalFile), String) {
   use names <- result.try(simplifile.read_directory(dir) |> describe_error)
   list.try_fold(names, [], fn(acc, name) {
-    case name == partial_dir_name {
-      // Control directory for in-flight downloads — never part of the mirror.
+    case name == partial_dir_name || name == trash_dir_name {
+      // Control directories (in-flight downloads, local trash) — never part
+      // of the mirror.
       True -> Ok(acc)
       False -> {
         let full = dir <> "/" <> name

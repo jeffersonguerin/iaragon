@@ -64,6 +64,7 @@ pub fn a_thousand_remote_files_converge_through_the_real_tree_test() {
       native_policy: entry.default_native_doc_policy(),
       signal_status: fn(_path, _status) { Nil },
       status_socket_path: "build/test-scratch/perf-pipeline-status.sock",
+      allow_mass_deletion: False,
     )
 
   // Converged = every file present with its exact bytes (sampling first and

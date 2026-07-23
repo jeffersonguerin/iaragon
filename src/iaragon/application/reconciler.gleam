@@ -15,6 +15,7 @@
 
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
@@ -31,6 +32,7 @@ import iaragon/domain/entry.{
 import iaragon/domain/native_docs
 import iaragon/domain/paths
 import iaragon/domain/reconcile
+import iaragon/domain/safety
 
 /// A remote file as observed on the wire, before path resolution. This is an
 /// application contract: the poller maps Drive types onto it.
@@ -149,6 +151,15 @@ pub type ReconcilerConfig {
     round_interval_ms: Int,
     /// Date stamp (YYYY-MM-DD) for conflicted-copy names; injected for tests.
     today: fn() -> String,
+    /// One line when something structurally wrong starts (mass-deletion
+    /// valve, failed scan) and stays quiet for the rest of the streak —
+    /// same journal discipline as the poller's report_trouble.
+    report_trouble: fn(String) -> Nil,
+    /// The explicit override for the mass-deletion valve (the composition
+    /// reads IARAGON_ALLOW_MASS_DELETE=1). Off by default: a round that
+    /// wants to delete most of the synced files is treated as an unmounted
+    /// mirror / empty listing, not as intent.
+    allow_mass_deletion: Bool,
   )
 }
 
@@ -170,6 +181,11 @@ type State {
     /// before the pool is first seen and after it goes down (re-established
     /// on the next message via `ensure_pool_monitored`).
     pool_monitor: Option(process.Monitor),
+    /// Streak flags for report_trouble: the first suppressed/failed round
+    /// reports, the rest of the streak stays quiet, and a healthy round
+    /// resets them.
+    warned_mass_deletion: Bool,
+    warned_scan: Bool,
   )
 }
 
@@ -211,6 +227,8 @@ pub fn start(
       pending_conflicts: set.new(),
       pending_move_paths: dict.new(),
       pool_monitor: None,
+      warned_mass_deletion: False,
+      warned_scan: False,
     ))
     |> actor.selecting(selector)
     |> actor.returning(subject)
@@ -381,8 +399,27 @@ fn apply_observation(
 
 fn run_round(state: State) -> State {
   let config = state.config
+  // A failed scan skips the round instead of crashing the actor: an
+  // unreadable disk would otherwise burn the supervisor's restart budget
+  // one round at a time until the whole daemon died.
+  case config.scan_local() {
+    Error(reason) -> {
+      case state.warned_scan {
+        True -> Nil
+        False ->
+          config.report_trouble(
+            "local scan failed: " <> reason <> " — skipping this round",
+          )
+      }
+      State(..state, warned_scan: True)
+    }
+    Ok(locals) -> run_round_with(State(..state, warned_scan: False), locals)
+  }
+}
+
+fn run_round_with(state: State, locals: List(LocalFile)) -> State {
+  let config = state.config
   let assert Some(root_id) = state.root_id
-  let assert Ok(locals) = config.scan_local()
   let known = process.call(config.state_owner, 5000, state_owner.ListKnown)
 
   let remotes = plan_remote_files(state.model, root_id, config.native_policy)
@@ -411,7 +448,41 @@ fn run_round(state: State) -> State {
     |> list.map(fn(local) { #(local.path, local) })
     |> dict.from_list
 
-  reconcile.reconcile_all(locals, remotes, known)
+  let decisions = reconcile.reconcile_all(locals, remotes, known)
+  // The mass-deletion valve: a round that wants to delete most of what was
+  // ever synced is an unmounted mirror or an empty/corrupt listing until a
+  // human says otherwise. Suppress ONLY the deletions — everything else
+  // keeps flowing — and report once per streak.
+  let #(decisions, state) = case config.allow_mass_deletion {
+    True -> #(decisions, State(..state, warned_mass_deletion: False))
+    False ->
+      case safety.judge_mass_deletion(decisions, list.length(known)) {
+        safety.DeletionsAllowed -> #(
+          decisions,
+          State(..state, warned_mass_deletion: False),
+        )
+        safety.DeletionsSuppressed(planned, known_count) -> {
+          case state.warned_mass_deletion {
+            True -> Nil
+            False ->
+              config.report_trouble(
+                "mass deletion valve: this round would delete "
+                <> int.to_string(planned)
+                <> " of "
+                <> int.to_string(known_count)
+                <> " synced files — deletions suppressed (unmounted mirror"
+                <> " or empty listing? set IARAGON_ALLOW_MASS_DELETE=1 and"
+                <> " restart if this is intended)",
+              )
+          }
+          #(
+            safety.drop_deletions(decisions),
+            State(..state, warned_mass_deletion: True),
+          )
+        }
+      }
+  }
+  decisions
   |> list.fold(state, fn(state, decision) {
     case decision {
       decision.DownloadRemote(file_id, _path) -> {

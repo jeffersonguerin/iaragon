@@ -302,6 +302,24 @@ pub fn a_shortcut_links_to_its_target_test() {
   assert string.contains(contents, "https://drive.google.com/open?id=id-target")
 }
 
+pub fn a_deleted_blob_lands_in_the_local_trash_test() {
+  // A remote delete never unlinks user content: the mirror copy is MOVED
+  // into .iaragon-trash/ (same discipline as .stversions/.dropbox.cache),
+  // so a wrong or malicious remote deletion is recoverable locally.
+  let owner = fakes.start_ephemeral_state_owner()
+  let #(pool, root) = start_pool("delete-trash", owner, a_working_fetch())
+  let remote = a_remote("id-1", "keep-me.txt")
+  process.send(pool, transfer_pool.EnqueueDownload(remote, option.None))
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
+
+  let assert Some(known) = known_of(owner, "id-1")
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(known))
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-1") == None })
+  assert simplifile.is_file(root <> "/keep-me.txt") == Ok(False)
+  assert simplifile.is_file(root <> "/.iaragon-trash/keep-me.txt") == Ok(True)
+}
+
 pub fn deleting_locally_removes_the_file_and_forgets_it_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let #(pool, root) = start_pool("delete", owner, a_working_fetch())
