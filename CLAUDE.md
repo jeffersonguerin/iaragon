@@ -56,6 +56,10 @@ de arquivos.
   Armadilha aprendida: `{stream, path}` FAZ APPEND em arquivo existente — por
   isso downloads vão para `<dest>.iaragon-partial` e são renomeados no
   sucesso (atomicidade de espelho de graça).
+  Segunda armadilha (sessão 22): **path que vem do Gleam NUNCA passa por
+  `binary_to_list/1`** — isso entrega os bytes da UTF-8, que o Erlang relê
+  como codepoints (`ç` → `Ã§`) e o arquivo aterrissa num nome sósia. Usar
+  `unicode:characters_to_list(P, utf8)`. Vale para todo FFI que receba path.
 - Testes: gleeunit. Rodar com `gleam test`; build com `gleam build`.
 - **API gleam_otp 1.2** (pós-1.0, mudou muito — não usar API antiga):
   `actor.new(state) |> actor.on_message(fn) |> actor.named(name) |> actor.start`;

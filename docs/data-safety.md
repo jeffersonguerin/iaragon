@@ -29,3 +29,17 @@ entraram com TDD:
   Links `.desktop` gerados e dirs vazios seguem delete direto (não são
   conteúdo do usuário). O reconciler ganhou `report_trouble` +
   `allow_mass_deletion` no config; `start_daemon` ganhou o parâmetro.
+- **Path UTF-8 nos FFIs** (sessão 22, achado em uso real contra um Drive em
+  português): `binary_to_list/1` numa string do Gleam devolve os BYTES da
+  UTF-8, e com `native_name_encoding = utf8` o Erlang relê esses bytes como
+  codepoints — "ç" (`0xC3 0xA7`) vira "Ã§". No download o FFI gravava o
+  parcial num nome sósia corrompido, o `rename` do lado Gleam procurava o
+  nome certo, não achava, e **o arquivo nunca chegava ao espelho** — falha
+  silenciosa, com o parcial órfão acumulando em `.iaragon-partial/`. O
+  espelho ficava incompleto sem nada reclamar, que é a pior forma de perda:
+  o usuário acredita que está sincronizado. O mesmo defeito estava no
+  `iaragon_file_ffi` (upload não abriria arquivo acentuado). Corrigido com
+  `unicode:characters_to_list(Path, utf8)` nos dois, com fallback para os
+  bytes crus quando o path não é UTF-8 válido (um espelho pode conter
+  qualquer sequência de bytes). Coberto por teste nos dois sentidos.
+  Só escapou até aqui porque a suíte usava nomes ASCII.

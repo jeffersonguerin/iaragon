@@ -29,9 +29,24 @@ download_to_file(Url, AuthorizationValue, DestPath, TimeoutMs) ->
     {ok, _Started} = application:ensure_all_started([inets, ssl]),
     get_following_redirects(binary_to_list(Url),
                             binary_to_list(AuthorizationValue),
-                            binary_to_list(DestPath),
+                            path_chars(DestPath),
                             TimeoutMs,
                             ?MAX_REDIRECTS).
+
+%% Drive names are UTF-8 and routinely carry accents, so the destination is a
+%% UTF-8 binary. binary_to_list/1 would pass the raw BYTES to the file layer,
+%% which reads them back as codepoints when native_name_encoding is utf8 — "ç"
+%% (0xC3 0xA7) lands as "Ã§". The bytes would then be written beside the wanted
+%% path under a mangled lookalike and the rename into the mirror would find
+%% nothing, losing the download silently. Decode to codepoints instead. (The
+%% URL and the header stay byte lists: both are ASCII by construction.)
+path_chars(Path) ->
+    case unicode:characters_to_list(Path, utf8) of
+        Chars when is_list(Chars) -> Chars;
+        %% Not valid UTF-8: the raw bytes are the best remaining guess, and a
+        %% failed write surfaces as a normal transport error.
+        _ -> binary_to_list(Path)
+    end.
 
 get_following_redirects(_Url, _Authorization, _DestPath, _TimeoutMs, 0) ->
     {error, {transport_failed, <<"too many redirects">>}};

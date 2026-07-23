@@ -156,6 +156,25 @@ pub fn an_endless_redirect_chain_is_refused_test() {
   assert simplifile.is_file(destination) == Ok(False)
 }
 
+// Drive names are UTF-8 and routinely carry accents, so the destination
+// handed to the FFI is a UTF-8 binary. Converting it with binary_to_list/1
+// yields raw BYTES, and with native_name_encoding = utf8 Erlang reads those
+// bytes back as codepoints — "ç" (0xC3 0xA7) becomes "Ã§". The bytes then land
+// next to the requested path under a mangled lookalike, the rename into the
+// mirror finds nothing, and the file silently never arrives.
+pub fn an_accented_destination_receives_the_bytes_test() {
+  let port = serve_once(200, "acentuado")
+  let destination = scratch_dir <> "/utf8/Condições de Apresentação.pdf"
+  assert download.fetch_file_to_disk(
+      url: a_local_url(port),
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+    == Ok(Nil)
+  assert simplifile.read(destination) == Ok("acentuado")
+}
+
 pub fn a_refusal_reports_the_status_and_writes_nothing_test() {
   let port = serve_once(404, "not found")
   let destination = scratch_dir <> "/refused/report.txt"
