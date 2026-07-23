@@ -31,6 +31,18 @@ pub fn each_request_line_gets_its_answer_test() {
     == Ok(["synced", "syncing", "unknown"])
 }
 
+pub fn the_socket_is_owner_only_test() {
+  let assert Ok(Nil) = simplifile.create_directory_all(sock_dir)
+  let sock = sock_dir <> "/perms.sock"
+  let _ = simplifile.delete(sock)
+  let assert Ok(_) = status_server.start(sock, fn(_line) { "synced" })
+
+  let assert Ok(info) = simplifile.file_info(sock)
+  // The status protocol reveals which files exist in the mirror, so no
+  // other local user may connect.
+  assert simplifile.file_info_permissions_octal(info) == 0o600
+}
+
 pub fn a_stale_socket_file_is_replaced_on_start_test() {
   let assert Ok(Nil) = simplifile.create_directory_all(sock_dir)
   let sock = sock_dir <> "/stale.sock"

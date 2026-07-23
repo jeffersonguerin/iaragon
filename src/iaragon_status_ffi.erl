@@ -13,10 +13,19 @@ serve_status_lines(SockPath, Answer) ->
     Options = [binary,
                {ifaddr, {local, PathString}},
                {packet, line},
+               %% Cap one request line: a path is short, and without this an
+               %% endless line with no newline would grow the driver buffer
+               %% until the daemon runs out of memory. Overflow drops the
+               %% connection (emsgsize on recv).
+               {packet_size, 4096},
                {active, false},
                {reuseaddr, true}],
     case gen_tcp:listen(0, Options) of
         {ok, Listen} ->
+            %% Owner-only: the status protocol discloses which files exist in
+            %% the user's mirror, so no other local user may connect. (The
+            %% fallback socket dir is not guaranteed private.)
+            _ = file:change_mode(PathString, 8#600),
             Acceptor = spawn_link(fun() -> accept_clients(Listen, Answer) end),
             {ok, Acceptor};
         {error, Reason} ->
