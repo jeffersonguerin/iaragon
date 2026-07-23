@@ -781,8 +781,13 @@ de um core; Drives típicos ≤ 10k são triviais).
 - **CI local via `.githooks/` (sessão 16)**: rodar `./scripts/setup-dev.sh`
   no início de cada sessão (seta `core.hooksPath`, config não versionada).
   O `pre-commit` recusa commit sem `gleam format --check` limpo e suíte
-  verde — a regra "todo commit verde" agora é mecânica. Bypass de
-  emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
+  verde — a regra "todo commit verde" agora é mecânica. O `pre-push`
+  (sessão 21) recusa push com `gleam build --warnings-as-errors` sujo —
+  em Gleam o compilador É o linter (não existe linter externo; format é
+  só formatação), e warnings re-emitem até para módulo em cache (validado
+  empiricamente), então nada sobe com warning. No pre-push e não no
+  pre-commit por decisão do usuário: ciclo de commit barato, gate na
+  saída. Bypass de emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
   do shell chamador); commits via ferramenta precisam do
   `export PATH=/opt/otp27/bin:$PATH` no mesmo comando.
 - **LSP do Gleam para Claude Code (sessão 16)**: plugin versionado em

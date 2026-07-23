@@ -1,0 +1,21 @@
+#!/bin/sh
+# Local CI, push gate: nothing leaves the machine with compiler warnings.
+# The compiler is the linter in Gleam (there is no external one): unused
+# imports/variables, deprecations and the like arrive as warnings — and
+# they re-emit even for cached modules, so a warning cannot hide behind an
+# incremental build. Living here (not in pre-commit) keeps the commit
+# cycle cheap; the pre-commit hook still guards formatting and the suite.
+# Bypass for emergencies: git push --no-verify.
+set -eu
+
+if ! command -v gleam >/dev/null 2>&1; then
+  echo "pre-push: 'gleam' not found in PATH." >&2
+  echo "pre-push: this project needs Gleam + Erlang/OTP >= 26 (see README)." >&2
+  exit 1
+fi
+
+echo "pre-push: gleam build --warnings-as-errors"
+if ! gleam build --warnings-as-errors; then
+  echo "pre-push: build has warnings — push refused." >&2
+  exit 1
+fi
