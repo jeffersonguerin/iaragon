@@ -536,6 +536,52 @@ Residuais desta rodada, RESOLVIDOS (fecham a sessão 2 de pentests):
 
 **Backlog de residuais zerado** (2 rodadas de pentest encerradas).
 
+Fase pentest de segurança (sessão 18): 3 subagentes focados em penetração
+forçada, vazamento de DADOS e vazamento de CREDENCIAIS. Corrigido:
+- **`state.db` world-readable (HIGH, vazamento de dados)**: o DB indexa a
+  árvore inteira do Drive (fileId↔path + metadados) e era criado 0644 num dir
+  0755 → qualquer usuário local lia `~/.local/share/iaragon/state.db` e
+  enumerava todo o Drive do usuário. `state_db.open` agora faz chmod 0600 no
+  arquivo (best-effort; `:memory:` não tem arquivo) e o composition root
+  restringe o data dir a 0700 (guard mais forte — cobre DB, socket e journal).
+  Sem credenciais no DB (é disclosure de metadados). Espelha o hardening do
+  `tokens.json`.
+
+Negativos verificados (não é vulnerabilidade):
+- **Credenciais em crash report de ator**: NENHUM ator guarda token/secret no
+  state — `token_manager` é FUNÇÃO (não ator; carrega da disco por chamada, só
+  na stack), e as closures dos transfer/drive ops capturam apenas `config_dir`
+  (um path); Erlang renderiza funs como refs opacas no `~p`/SASL. Um crash de
+  qualquer ator imprime refs de fun + path + metadata, nunca uma credencial.
+- **Header Authorization em redirect de download**: o download stream manda
+  `Bearer` no request inicial; o pentest provou (teste direto="leaked-auth",
+  redirect="no-auth") que o httpc do Erlang REMOVE o header Authorization ao
+  seguir um redirect — o token nunca acompanha o redirect (o alt=media 302 vai
+  p/ URL assinada do googleusercontent que não precisa dele). Guardas de
+  regressão adicionadas; sem mudança de código.
+- **Bearer em erros/logs**: nenhum `string.inspect`/print/panic transitivamente
+  contém token/secret (login imprime `OauthError` já sem payload; os FFI de
+  download formatam só `Reason`, nunca URL/headers).
+- **argv option injection nos emblemas**: o path passado ao `gio` é sempre
+  ABSOLUTO (`/home/.../GoogleDrive/...`), nunca começa com `-`; emblema é valor
+  fixo. Não alcançável.
+- **Escrita fora do espelho**: todo destino de write/delete/rename/mkdir é
+  `root_dir <> "/" <> P` com `P` só de segmentos sanitizados (control-strip
+  ANTES do check de `..`); `conflicts` só reescreve o último segmento de um
+  path já sanitizado. Não construível.
+
+Residual rastreado (documentado, NÃO alcançável no modelo de ameaça):
+- **Symlink TOCTOU em diretório intermediário (LOW)**: um processo do MESMO
+  usuário troca um dir intermediário do espelho por symlink entre a decisão e
+  o rename → write segue p/ fora. Sem ganho real: o daemon roda como o próprio
+  usuário, que já tem os direitos de FS. Fix exigiria travessia `openat`
+  por-componente (não exposto pelo simplifile). Nota de produto: o conteúdo do
+  espelho sob `~/GoogleDrive` é 0644/0755 (como o Google Drive for Desktop);
+  se confidencialidade do conteúdo entre usuários locais virar requisito, o
+  root do espelho precisaria de 0700.
+
+**Backlog de residuais de segurança zerado** (3 rodadas encerradas).
+
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
 exata usada no parser (incl. `shortcutDetails(targetId)`); um redirect OAuth sem `code`/`error` é malformado, e
