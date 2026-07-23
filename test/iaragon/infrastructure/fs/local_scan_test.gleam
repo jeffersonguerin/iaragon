@@ -38,6 +38,27 @@ pub fn partial_download_files_are_ignored_test() {
   assert list.map(scanned, fn(file) { file.path }) == ["ok.txt"]
 }
 
+// Symlinks inside the mirror are NOT followed: a link would otherwise get
+// its target's bytes uploaded to Drive (exfiltration of files outside the
+// mirror, e.g. a link to ~/.ssh), and a link cycle would loop the scan.
+pub fn symlinks_are_not_followed_test() {
+  let root = scratch_dir <> "/symlinks"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) = simplifile.write(to: root <> "/real.txt", contents: "hi")
+  // A secret outside the mirror, and a symlink to it inside.
+  let outside = scratch_dir <> "/outside-secret.txt"
+  let assert Ok(Nil) = simplifile.write(to: outside, contents: "secret")
+  let assert Ok(Nil) =
+    simplifile.create_symlink(to: outside, from: root <> "/link.txt")
+  // A symlinked directory must not be recursed into either.
+  let assert Ok(Nil) =
+    simplifile.create_symlink(to: scratch_dir, from: root <> "/loop")
+
+  let assert Ok(scanned) = local_scan.scan_mirror(root)
+  assert list.map(scanned, fn(file) { file.path }) == ["real.txt"]
+}
+
 pub fn a_missing_mirror_root_is_created_empty_test() {
   let root = scratch_dir <> "/brand-new"
   let assert Ok([]) = local_scan.scan_mirror(root)
