@@ -1,6 +1,14 @@
 name = "iaragon"
+# Rolling release: this field never changes (no tags, no changelog); it
+# exists because the standard scaffold carries it.
+version = "1.0.0"
 target = "erlang"
 description = "Bidirectional Google Drive sync daemon for Linux, on the BEAM"
+# stdlib APIs used here (e.g. bit_array base64) need this compiler line and
+# Erlang/OTP >= 26 at runtime.
+gleam = ">= 1.17.0"
+# A daemon, not a library: no module is a public API.
+internal_modules = ["iaragon/*"]
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
