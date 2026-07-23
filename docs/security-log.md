@@ -262,3 +262,52 @@ Reconfirmados nesta passada: segredos só em corpo POST HTTPS (nunca query),
 erros OAuth sem payload, loopback 127.0.0.1 one-shot com packet_size + state
 CSRF + PKCE S256 (verifier nunca sai do processo; roubo do code é inútil sem
 ele), clamp de expires_in, temp do token dentro de dir já-0700.
+
+
+Fase garantia emprestada do runtime (sessão 22): rodando a suíte sobre um
+Erlang de distro (OTP 27.3.4.6, **inets 9.3.2.2**), veio vermelho em
+`a_redirect_is_followed_without_forwarding_the_bearer_test`, o pentest que
+exige que um redirect não leve o `Authorization` adiante. Não era teste
+frágil: aquele inets é anterior ao fix do **CVE-2026-48856**, em que o
+`httpc` repassava
+`Authorization`/`Cookie`/`Referer`/`Origin` verbatim ao seguir redirect para
+outro host ou porta (corrigido em inets 9.3.2.6 / 9.6.2.2 / 9.7.1; **nenhuma
+release do OTP 26 carrega o fix**).
+
+O achado real não é o CVE — é que **a garantia era emprestada do runtime**.
+O `iaragon_download_ffi` mandava o bearer e delegava o follow ao `httpc`
+(`autoredirect` default), então a promessa escrita no comentário do próprio
+pentest não era implementada em lugar nenhum: em qualquer OTP anterior ao
+fix, o token do usuário ia junto para o alvo do redirect. Corrigido (TDD, e a
+ordem importou — a correção foi feita e provada AINDA no OTP vulnerável,
+então o verde não veio do runtime): o FFI desliga `autoredirect` e segue os
+redirects ele mesmo, removendo o header quando esquema/host/porta do destino
+diferem (RFC 9110 §15.4), com teto de 5 saltos. Alvo não-parseável cai no
+lado seguro (origem nunca igual → credencial removida). Dois testes novos
+fecham as bordas que a correção abriu: **redirect same-origin mantém o
+bearer** (estripar sempre passaria no pentest quebrando todo redirect
+legítimo do Drive) e **cadeia infinita termina em erro** (o teto do `httpc`
+deixou de valer quando passamos a seguir por conta própria). Também: cada
+salto apaga o arquivo parcial antes de escrever, senão o `{stream, Path}`
+(que faz APPEND) concatenaria o corpo de um hop no outro.
+
+Negativo verificado: **as demais chamadas ao Drive não estavam expostas** —
+metadata, changes e upload vão pelo `gleam_httpc`, cujo `configure()` tem
+`follow_redirects: False` por default, e `send`/`send_bits` usam esse
+default; sem follow, não há para onde vazar. Por isso o `install.sh` **avisa
+e não barra** em runtime vulnerável (`warn_if_inets_vulnerable`): com o FFI
+blindado o daemon não está exposto, e bloquear rejeitaria o Erlang de distros
+correntes sem ganho — mas quem opera um daemon que guarda token OAuth merece
+saber que o Erlang embaixo está sem um fix de segurança.
+
+Decisão de produto na mesma passada: **piso de runtime subiu de OTP 26 para
+OTP 29**. O 26 estava errado nos próprios termos — nenhuma release dele
+carrega o fix do CVE-2026-48856, então "≥ 26" recomendava um ramo onde o
+usuário sequer tinha para onde subir. Em vez de perseguir o ramo mais antigo
+ainda corrigível (27), o requisito passou a ser o ramo corrente: um daemon que
+guarda token OAuth não tem por que rodar sobre runtime que ninguém mais
+conserta. Atualizado em `install.sh` (guard, plano, mensagens e o tarball de
+exemplo, que apontava para um OTP que o próprio guard passaria a recusar),
+`README.md`, `CONTRIBUTING.md`, `gleam.toml`, `docs/distribution.md` e aqui.
+`inets_patched` simplificou junto: com o guard recusando 27/28, só resta
+comparar contra 9.7.1 — que ainda pega um OTP 29.0/29.0.1 anterior ao fix.

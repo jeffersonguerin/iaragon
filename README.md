@@ -36,7 +36,7 @@ of them restarts that actor alone.
 
 ## Requirements
 
-- Erlang/OTP ≥ 26 (runtime requirement), Gleam ≥ 1.17
+- Erlang/OTP ≥ 29 (runtime requirement), Gleam ≥ 1.17
 - `inotify-tools` for the inotify watcher (optional; polling fallback)
 - `gcc`/`make` at build time (sqlight's NIF), `rebar3` (filespy's fs dep)
 
@@ -61,9 +61,11 @@ curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install
 - **Transparent**: it prints a plan of what's present and what it will
   install before acting, echoes the exact command per package, and shows a
   summary at the end.
-- Erlang/OTP ≥ 26 is required at runtime; if your distro's Erlang is older,
+- Erlang/OTP ≥ 29 is required at runtime; if your distro's Erlang is older,
   the script stops with instructions rather than installing something that
-  would crash.
+  would crash. The floor is the current OTP branch on purpose: older branches
+  either break outright or no longer receive httpc security fixes, and this
+  daemon holds a Google OAuth token.
 
 Overridable by environment: `IARAGON_REF` (git ref, default `main`),
 `IARAGON_PREFIX` (default `~/.local`), `IARAGON_PM` (force the package

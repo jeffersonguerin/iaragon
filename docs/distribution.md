@@ -24,7 +24,7 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
     gerenciador p/ casar com o toolchain do usuário.
   - **Transparente**: imprime um PLANO (presente × instalar, e como) antes de
     agir, ecoa o comando exato por pacote, e um resumo no fim.
-  - **Guard de OTP ≥ 26**: Erlang mais velho não é "consertado" — o script
+  - **Guard de OTP ≥ 29**: Erlang mais velho não é "consertado" — o script
     PARA com instruções (kerl/asdf ou tarball builds.hex.pm), senão o daemon
     crasharia no primeiro uso.
   - Instala unit **systemd de usuário** (`~/.config/systemd/user/

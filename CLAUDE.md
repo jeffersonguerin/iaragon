@@ -46,7 +46,11 @@ de arquivos.
 - FFI Erlang só quando indispensável e fino: `src/iaragon_loopback_ffi.erl`
   (gen_tcp one-shot para o redirect OAuth), `src/iaragon_download_ffi.erl`
   (httpc `{stream, path}` para download direto a disco; TLS confia no default
-  verify_peer do httpc em OTP ≥ 26 — mesma premissa do gleam_httpc),
+  verify_peer do httpc (default desde o OTP 26) — mesma premissa do
+  gleam_httpc; segue
+  redirects ELE MESMO, com `autoredirect` desligado, removendo o
+  `Authorization` quando a origem muda — não delegar isso ao httpc, ver
+  CVE-2026-48856 em docs/security-log.md),
   `src/iaragon_file_ffi.erl` (leitura em chunks p/ upload resumable) e
   `src/iaragon_exec_ffi.erl` (os:find_executable p/ detectar inotify-tools).
   Armadilha aprendida: `{stream, path}` FAZ APPEND em arquivo existente — por
@@ -120,7 +124,15 @@ Histórico e residuais documentados em `docs/`.
 
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
-- **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas
+- Armadilha de empacotamento (vale para qualquer distro): o pacote `rebar3` do
+  Debian/Ubuntu depende de `erlang-dev`/`erlang-inets`, então remover o Erlang
+  da distro remove o rebar3 junto. Onde o Erlang não vem do gerenciador de
+  pacotes, usar o escript standalone dos releases do GitHub — ele roda em
+  qualquer `erl` do PATH.
+- **Erlang/OTP ≥ 29 obrigatório em runtime** (piso subido de 26 na sessão 22:
+  nenhuma release do OTP 26 recebeu o fix do CVE-2026-48856 do httpc, então
+  quem ficasse no 26 não tinha para onde subir dentro do ramo — ver
+  [docs/security-log.md](docs/security-log.md)). Histórico: o OTP 25 do apt compila, mas
   `bit_array.base64_url_encode` do stdlib explode em runtime ("OTP/26 or
   higher is required"). Usar OTP pré-compilado do builds.hex.pm:
   `curl https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-27.3.4.14.tar.gz`,

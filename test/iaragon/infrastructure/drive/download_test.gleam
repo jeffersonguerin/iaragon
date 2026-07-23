@@ -16,6 +16,12 @@ fn serve_redirect(location: String) -> Int
 @external(erlang, "iaragon_serve_once_ffi", "serve_auth_reporting")
 fn serve_auth_reporting() -> Int
 
+@external(erlang, "iaragon_serve_once_ffi", "serve_redirect_to_self")
+fn serve_redirect_to_self() -> Int
+
+@external(erlang, "iaragon_serve_once_ffi", "serve_redirect_loop")
+fn serve_redirect_loop() -> Int
+
 const scratch_dir = "build/test-scratch/download"
 
 fn a_local_url(port: Int) -> String {
@@ -113,6 +119,41 @@ pub fn a_redirect_is_followed_without_forwarding_the_bearer_test() {
   // The redirected request reached the target without the Authorization
   // header (had it forwarded the bearer, the body would be "leaked-auth").
   assert simplifile.read(destination) == Ok("no-auth")
+}
+
+// The mirror image of the pentest above: stripping is scoped to a CHANGE of
+// origin (RFC 9110 15.4), so a redirect back to the same scheme/host/port must
+// still carry the bearer. Without this, "no-auth" everywhere would look like a
+// pass while actually having broken every legitimate same-host redirect.
+// "leaked-auth" is the reporting server's word for "the header arrived" — here
+// that is the wanted outcome, not a leak.
+pub fn a_same_origin_redirect_keeps_the_bearer_test() {
+  let port = serve_redirect_to_self()
+  let destination = scratch_dir <> "/same-origin/report.txt"
+  let assert Ok(Nil) =
+    download.fetch_file_to_disk(
+      url: "http://127.0.0.1:" <> int.to_string(port) <> "/files/id-1?alt=media",
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+  assert simplifile.read(destination) == Ok("leaked-auth")
+}
+
+// Following redirects in the FFI means httpc's own cap no longer applies, so
+// the chain has to be bounded here or a looping server would hang a transfer
+// worker forever.
+pub fn an_endless_redirect_chain_is_refused_test() {
+  let port = serve_redirect_loop()
+  let destination = scratch_dir <> "/redirect-loop/report.txt"
+  assert download.fetch_file_to_disk(
+      url: "http://127.0.0.1:" <> int.to_string(port) <> "/files/id-1?alt=media",
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+    == Error(download.TransportFailed("too many redirects"))
+  assert simplifile.is_file(destination) == Ok(False)
 }
 
 pub fn a_refusal_reports_the_status_and_writes_nothing_test() {

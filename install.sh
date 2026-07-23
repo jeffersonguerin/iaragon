@@ -35,7 +35,7 @@
 #                   (default: unset -> latest)
 #   IARAGON_NO_SUDO set to 1 to never call sudo (fail instead if a dep is missing)
 #
-# Honest about its limits: the daemon needs Erlang/OTP >= 26 at RUNTIME. If
+# Honest about its limits: the daemon needs Erlang/OTP >= 29 at RUNTIME. If
 # your distro ships an older Erlang, this script stops and tells you how to
 # get a newer one rather than installing something that would crash on first
 # use.
@@ -172,12 +172,44 @@ otp_release() {
   have erl || return 1
   erl -noshell -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt()' 2>/dev/null
 }
+# The floor is 29, the current OTP branch. It used to be 26, which was wrong on
+# its own terms: no OTP 26 release ever carried the CVE-2026-48856 fix for
+# httpc (only the 27/28/29 branches got it), so anyone left on 26 had no
+# upgrade path within their branch for a credential-leak fix in the very HTTP
+# client this daemon runs on. Rather than track the oldest still-patchable
+# branch, the requirement is simply the current one — a daemon holding a Google
+# OAuth token has no business running on a runtime nobody is fixing anymore.
 otp_ok() {
   rel="$(otp_release 2>/dev/null || true)"
   [ -n "$rel" ] || return 1
   major="${rel%%.*}"
   case "$major" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$major" -ge 26 ]
+  [ "$major" -ge 29 ]
+}
+# CVE-2026-48856: httpc forwarded Authorization/Cookie/... verbatim when
+# following a redirect to a different host or port. iaragon does not depend on
+# the runtime for that guarantee — its downloader follows redirects itself and
+# strips the credential across origins, and every other Drive call goes through
+# gleam_httpc, which does not follow redirects at all — so this is a warning,
+# never a blocker. It is reported because the daemon holds a Google OAuth token
+# and the operator should know the Erlang underneath is missing a security fix.
+# Patched in inets 9.7.1 (OTP 29.0.2); the 27 and 28 branches got it as 9.3.2.6
+# and 9.6.2.2, but otp_ok already refuses those, so 9.7.1 is the only bar left
+# to check — it still catches an OTP 29.0 or 29.0.1 that predates the fix.
+# Version parts are compared numerically, not lexically: "9.10" outranks "9.7".
+inets_patched() {
+  have erl || return 1
+  verdict="$(erl -noshell -eval '
+    _ = application:load(inets),
+    {ok, Vsn} = application:get_key(inets, vsn),
+    Parts = [list_to_integer(P) || P <- string:lexemes(Vsn, ".")],
+    io:format("~s", [case Parts >= [9,7,1] of true -> "yes"; false -> "no" end]),
+    halt().' 2>/dev/null)"
+  [ "$verdict" = "yes" ]
+}
+warn_if_inets_vulnerable() {
+  inets_patched && return 0
+  warn "Erlang/OTP $(otp_release)'s httpc is missing the CVE-2026-48856 fix (credentials forwarded across redirects) — iaragon strips the token itself and is not exposed, but updating Erlang is still advisable"
 }
 gleam_ok() { have gleam; }
 gleam_ver() { gleam --version 2>/dev/null | awk '{print $NF}'; }
@@ -211,22 +243,22 @@ ensure_erlang() {
     # existing toolchain (kerl/asdf/manual): it would duplicate it and, on the
     # distros that ship an old Erlang, still not reach 26. Send them to a real
     # upgrade path instead.
-    warn "Erlang/OTP $(otp_release) is older than the required 26 — keeping your install untouched"
+    warn "Erlang/OTP $(otp_release) is older than the required 29 — keeping your install untouched"
   else
     log "installing Erlang via $PM"
     pkg_for erlang || true
     otp_ok && { add_newly "erlang($PM)"; log "Erlang/OTP $(otp_release): installed via $PM"; return 0; }
   fi
   cat >&2 <<EOF
-$(printf '%berror:%b' "$C_ERR" "$C_OFF") iaragon needs Erlang/OTP >= 26 at runtime, and $PM could not
+$(printf '%berror:%b' "$C_ERR" "$C_OFF") iaragon needs Erlang/OTP >= 29 at runtime, and $PM could not
 provide one$( { have erl && printf ' (found OTP %s)' "$(otp_release)"; } || true ).
 
 Install a recent Erlang, then re-run this script. Options:
   * kerl / asdf (any distro):   https://github.com/kerl/kerl
   * a prebuilt OTP tarball (e.g. Ubuntu 24.04):
-      curl -fsSLO https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-27.3.4.14.tar.gz
-      tar xzf OTP-27.3.4.14.tar.gz && (cd OTP-27.3.4.14 && ./Install -minimal "\$PWD")
-      export PATH="\$PWD/OTP-27.3.4.14/bin:\$PATH"
+      curl -fsSLO https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-29.0.3.tar.gz
+      tar xzf OTP-29.0.3.tar.gz && (cd OTP-29.0.3 && ./Install -minimal "\$PWD")
+      export PATH="\$PWD/OTP-29.0.3/bin:\$PATH"
 EOF
   exit 1
 }
@@ -353,7 +385,7 @@ plan_row git     "git"           "$p_git"
 plan_row curl    "curl"          "$p_curl"
 plan_row cc      "C compiler"    "$p_cc"
 plan_row make    "make"          "$p_make"
-plan_row erlang  "Erlang/OTP26+" "$p_erl"
+plan_row erlang  "Erlang/OTP29+" "$p_erl"
 plan_row gleam   "Gleam"         "$p_gleam"
 plan_row rebar3  "rebar3"        "$p_rebar"
 plan_row inotify "inotify-tools" "$p_inotify"
@@ -376,6 +408,7 @@ else
 fi
 ensure_base make make "make"
 ensure_erlang
+warn_if_inets_vulnerable
 ensure_gleam
 ensure_rebar3
 ensure_inotify

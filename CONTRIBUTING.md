@@ -6,7 +6,8 @@ out of a sync daemon. Read this once and everything else follows.
 
 ## Dev setup
 
-- **Erlang/OTP ≥ 26** (older OTP compiles but crashes at runtime) and
+- **Erlang/OTP ≥ 29** (older OTP either crashes at runtime or sits on a branch
+  no longer receiving httpc security fixes — see `docs/security-log.md`) and
   **Gleam ≥ 1.17**; `rebar3` on PATH; `gcc`/`make` (sqlight's NIF);
   `inotify-tools` optional (tests fall back to polling without it).
 - One-time, from the repo root:
