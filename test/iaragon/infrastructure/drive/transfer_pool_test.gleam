@@ -509,6 +509,39 @@ pub fn uploading_a_new_file_creates_records_and_settles_test() {
   assert known.md5 == Some("m-up")
 }
 
+pub fn an_upload_records_scan_time_metadata_not_a_fresh_stat_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/upload-scan-meta"
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/mine.txt", contents: "abc")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+      upload_to_drive: fn(_target, _source, _size) {
+        Ok(an_uploaded_file("id-up", "mine.txt"))
+      },
+      settle_upload: fn(_path, _outcome) { Nil },
+    )
+  let pool = start_pool_with(config)
+
+  // a_plan carries the scan-time metadata: size 3, mtime 1000.
+  process.send(
+    pool,
+    transfer_pool.EnqueueUpload(a_plan("mine.txt", "mine.txt")),
+  )
+
+  assert fakes.retry_until(40, fn() { known_of(owner, "id-up") != None })
+  let assert Some(known) = known_of(owner, "id-up")
+  // The known records the mtime captured at scan (1000), NOT a fresh stat of
+  // the file after the upload. So an edit landing mid-upload — which bumps
+  // the real mtime — leaves known.mtime older than the file, and the next
+  // round re-detects the change and re-uploads instead of freezing a
+  // possibly-torn remote as synced forever.
+  assert known.local_mtime_seconds == 1000
+  assert known.size == 3
+}
+
 pub fn uploading_a_modified_file_updates_in_place_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let events = process.new_subject()

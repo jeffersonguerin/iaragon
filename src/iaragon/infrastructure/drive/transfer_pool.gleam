@@ -202,7 +202,11 @@ fn run_delete_local(
         _ -> False
       }
     _ -> {
-      let _ = simplifile.delete(target)
+      // delete_file, not delete: the latter is recursive, so if this path
+      // is somehow a directory now (kind drift / TOCTOU), a whole tree of
+      // never-synced bytes would be lost. A non-directory delete_file
+      // fails harmlessly instead.
+      let _ = simplifile.delete_file(target)
       True
     }
   }
@@ -581,15 +585,24 @@ fn push_file(
     source,
     plan.local.size,
   ))
-  record_known(
-    config,
-    uploaded.file_id,
-    plan.local.path,
-    uploaded.modified_time,
-    uploaded.md5,
-    plan.local.size,
-    Blob,
+  // Record the metadata captured at scan time, NOT a fresh stat: if the user
+  // edited the file mid-upload (Drive then holds torn bytes), the real file
+  // is now newer than this recorded mtime, so the next round detects a local
+  // change and re-uploads — self-healing — instead of freezing the corrupt
+  // remote as "synced" and never revisiting it.
+  process.send(
+    config.state_owner,
+    state_owner.PutKnown(KnownFile(
+      file_id: uploaded.file_id,
+      path: plan.local.path,
+      remote_modified_time: uploaded.modified_time,
+      md5: uploaded.md5,
+      size: plan.local.size,
+      local_mtime_seconds: plan.local.mtime_seconds,
+      kind: Blob,
+    )),
   )
+  config.signal_status(plan.local.path, entry.Synced)
   config.settle_upload(
     plan.local.path,
     Ok(remote_poller.translate_file(uploaded)),
