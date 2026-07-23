@@ -457,3 +457,10 @@ state errado invalida qualquer resultado; httpc `{stream, path}` faz append
   (filespy/fs) — sem ele a app `fs` loga "backend port not found:
   inotifywait" (inofensivo) e o daemon usa o fallback polly; o teste
   end-to-end do inotify vira no-op.
+- **CI local via `.githooks/` (sessão 16)**: rodar `./scripts/setup-dev.sh`
+  no início de cada sessão (seta `core.hooksPath`, config não versionada).
+  O `pre-commit` recusa commit sem `gleam format --check` limpo e suíte
+  verde — a regra "todo commit verde" agora é mecânica. Bypass de
+  emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
+  do shell chamador); commits via ferramenta precisam do
+  `export PATH=/opt/otp27/bin:$PATH` no mesmo comando.
