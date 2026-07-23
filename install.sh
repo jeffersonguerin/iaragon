@@ -37,12 +37,29 @@
 # your distro ships an older Erlang, this script stops and tells you how to
 # get a newer one rather than installing something that would crash on first
 # use.
+#
+# Trust model: packages come from your package manager (its own signing).
+# The two direct downloads (the Gleam binary, the rebar3 escript) come over
+# HTTPS from the projects' official GitHub release URLs; transport authenticity
+# is TLS, and there is no additional pinned-checksum verification. If you need
+# that, install Gleam/rebar3 yourself first (they will be detected and kept).
+#
+# All the imperative work lives in main(), invoked on the very last line, so a
+# truncated `curl | sh` download never executes a partial script.
 set -eu
 
 REPO="${IARAGON_REPO:-https://github.com/jeffersonguerin/iaragon.git}"
 REF="${IARAGON_REF:-main}"
 PREFIX="${IARAGON_PREFIX:-$HOME/.local}"
 GLEAM_VERSION="${GLEAM_VERSION:-1.17.0}"
+
+# Guard the install prefix before it feeds an `rm -rf` below: it must be an
+# absolute path and never the filesystem root.
+case "$PREFIX" in
+  /)  echo "error: IARAGON_PREFIX must not be '/'" >&2; exit 1 ;;
+  /*) : ;;
+  *)  echo "error: IARAGON_PREFIX must be an absolute path (got '$PREFIX')" >&2; exit 1 ;;
+esac
 
 LIBDIR="$PREFIX/lib/iaragon"
 BINDIR="$PREFIX/bin"
@@ -169,7 +186,7 @@ ensure_erlang() {
   otp_ok && { add_newly "erlang($PM)"; log "Erlang/OTP $(otp_release): installed via $PM"; return 0; }
   cat >&2 <<EOF
 $(printf '%berror:%b' "$C_ERR" "$C_OFF") iaragon needs Erlang/OTP >= 26 at runtime, and $PM could not
-provide one$( have erl && printf ' (found OTP %s)' "$(otp_release)" ).
+provide one$( { have erl && printf ' (found OTP %s)' "$(otp_release)"; } || true ).
 
 Install a recent Erlang, then re-run this script. Options:
   * kerl / asdf (any distro):   https://github.com/kerl/kerl
@@ -225,8 +242,14 @@ ensure_rebar3() {
   log "fetching rebar3 (escript)"
   printf '%b    $ curl -fsSL %s%b\n' "$C_DIM" "$url" "$C_OFF"
   mkdir -p "$BINDIR"
-  curl -fsSL "$url" -o "$BINDIR/rebar3" || die "could not download rebar3"
-  chmod +x "$BINDIR/rebar3"
+  # Download to a temp path and move into place only on success, so a dropped
+  # connection never leaves a truncated rebar3 behind.
+  rtmp="$(mktemp)"
+  trap 'rm -f "$rtmp"' EXIT
+  curl -fsSL "$url" -o "$rtmp" || die "could not download rebar3"
+  chmod +x "$rtmp"
+  mv "$rtmp" "$BINDIR/rebar3"
+  trap - EXIT
   PATH="$BINDIR:$PATH"; export PATH
   have rebar3 || die "rebar3 still not runnable after install"
   add_newly "rebar3(official escript -> $BINDIR)"
@@ -263,6 +286,7 @@ plan_row() { # generic label present?
 }
 
 # --- go ---------------------------------------------------------------------
+main() {
 detect_pm
 if [ "$PM" = "none" ]; then
   warn "no supported package manager detected (apt/dnf/pacman/zypper/apk/brew) — build tools must already be present"
@@ -397,3 +421,6 @@ Next steps:
 
 Your mirror will live at ~/GoogleDrive.
 EOF
+}
+
+main "$@"
