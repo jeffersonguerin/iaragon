@@ -202,6 +202,30 @@ pub fn polling_repeats_on_the_configured_interval_test() {
     process.receive(deliver, 1000)
 }
 
+pub fn an_unregistered_reconciler_does_not_crash_the_poller_test() {
+  let owner = start_state_owner()
+  // The reconciler starts AFTER the poller in the supervision tree, so at
+  // boot the poller may self-kick and seed before the reconciler's named
+  // subject is registered. Delivering to an unregistered name must not crash
+  // the poller (a raw send would raise) — it must retry until the reconciler
+  // is up, never losing the seed.
+  let deliver = process.named_subject(process.new_name(prefix: "absent_recon"))
+  let calls = process.new_subject()
+  let port =
+    DrivePort(..a_port(), fetch_mirror_snapshot: fn() {
+      process.send(calls, Nil)
+      Ok(#("root-1", [a_sighting("id-1")]))
+    })
+  let poller = start_poller(owner, deliver, port, idle_interval)
+
+  // Two snapshot fetches prove the poller retried rather than crashing on the
+  // first unregistered delivery.
+  let assert Ok(Nil) = process.receive(calls, 1000)
+  let assert Ok(Nil) = process.receive(calls, 1000)
+  // And the poller process is still alive.
+  assert process.subject_owner(poller) != Error(Nil)
+}
+
 fn wait_for_page_token(
   owner: Subject(state_owner.Command),
   expected: option.Option(String),

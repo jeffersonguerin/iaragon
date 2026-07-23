@@ -155,8 +155,27 @@ fn seed_mirror(config: PollerConfig) -> Result(Nil, String) {
   // Token first: changes that happen during the listing get replayed later.
   use Nil <- result.try(ensure_page_token(config))
   use #(root_id, files) <- result.try(config.drive.fetch_mirror_snapshot())
-  process.send(config.deliver, reconciler.SeedMirror(root_id, files))
-  Ok(Nil)
+  deliver(config, reconciler.SeedMirror(root_id, files))
+}
+
+/// Send to the reconciler, tolerating the brief startup/restart window where
+/// its named subject is not yet registered: the reconciler starts AFTER the
+/// poller in the tree, so a self-kicked seed can race ahead of it. A raw send
+/// to an unregistered name raises and crashes the poller; instead report a
+/// transient error so the Poll retry re-attempts once the reconciler is up.
+/// Nothing is acknowledged (the seeded flag, the page token) until delivery
+/// succeeds, so the seed/changes are never lost.
+fn deliver(
+  config: PollerConfig,
+  message: reconciler.Command,
+) -> Result(Nil, String) {
+  case process.subject_owner(config.deliver) {
+    Ok(_registered) -> {
+      process.send(config.deliver, message)
+      Ok(Nil)
+    }
+    Error(Nil) -> Error("reconciler not registered yet")
+  }
 }
 
 fn ensure_page_token(config: PollerConfig) -> Result(Nil, String) {
@@ -176,14 +195,14 @@ fn advance_changes(config: PollerConfig) -> Result(Nil, String) {
   use #(changes, fresh_token) <- result.try(config.drive.fetch_all_changes(
     page_token,
   ))
-  case changes {
-    [] -> Nil
+  // Deliver BEFORE advancing the token: if the reconciler is momentarily
+  // unregistered, report a transient error so the token is not advanced and
+  // these changes are re-fetched (and re-delivered) on the retry.
+  use Nil <- result.try(case changes {
+    [] -> Ok(Nil)
     changes ->
-      process.send(
-        config.deliver,
-        reconciler.ApplyRemoteChanges(translate_changes(changes)),
-      )
-  }
+      deliver(config, reconciler.ApplyRemoteChanges(translate_changes(changes)))
+  })
   process.send(config.state_owner, state_owner.SetPageToken(fresh_token))
   Ok(Nil)
 }
