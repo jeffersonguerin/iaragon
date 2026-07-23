@@ -7,8 +7,13 @@
 -export([open_listener/1, await_request/2]).
 
 open_listener(Port) ->
-    Options = [binary, {packet, http_bin}, {active, false},
-               {ip, {127, 0, 0, 1}}, {reuseaddr, true}],
+    %% Cap the request line: any local process can reach the ephemeral port
+    %% during the login window, and without this an unterminated multi-MB URI
+    %% would grow the driver buffer until the login process runs out of memory
+    %% (same reasoning as the status socket's packet_size). An over-long line
+    %% fails cleanly as {error, emsgsize} on recv.
+    Options = [binary, {packet, http_bin}, {packet_size, 8192},
+               {active, false}, {ip, {127, 0, 0, 1}}, {reuseaddr, true}],
     case gen_tcp:listen(Port, Options) of
         {ok, Listen} ->
             {ok, ActualPort} = inet:port(Listen),
