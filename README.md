@@ -68,3 +68,7 @@ Layout: `src/iaragon/domain` (pure logic — no I/O, no OTP),
 (Drive/FS/persistence adapters and the supervision tree). Erlang FFI is
 kept thin, in `src/iaragon_*_ffi.erl`. See `CLAUDE.md` for the full
 decision log.
+
+## Licence
+
+[Apache-2.0](LICENSE).

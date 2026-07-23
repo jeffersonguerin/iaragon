@@ -1,6 +1,6 @@
 /*
     iaragon Dolphin integration: sync-status overlay icons.
-    SPDX-License-Identifier: LGPL-2.0-or-later
+    SPDX-License-Identifier: Apache-2.0
 */
 #pragma once
 
