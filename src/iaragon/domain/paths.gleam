@@ -48,35 +48,54 @@ pub fn resolve_paths(
           })
       }
     })
-  descend(root_id, "", children_by_parent, dict.new())
+  walk([#(root_id, "")], children_by_parent, dict.new())
 }
 
-fn descend(
-  folder_id: String,
-  prefix: String,
+/// Breadth-of-the-tree traversal driven by an explicit worklist rather than
+/// recursion, so resolution is depth-INDEPENDENT: attacker-controlled folder
+/// nesting grows this heap-allocated worklist, never the process call stack
+/// (deep recursion would otherwise be a memory/latency DoS). Tail-recursive,
+/// so it runs in constant stack space.
+fn walk(
+  worklist: List(#(String, String)),
   children_by_parent: Dict(String, List(RemoteNode)),
   resolved: Dict(String, String),
 ) -> Dict(String, String) {
-  case dict.get(children_by_parent, folder_id) {
-    Error(Nil) -> resolved
-    Ok(children) ->
-      list.fold(assign_final_names(children), resolved, fn(resolved, child) {
-        let #(node, name) = child
-        // A node already placed (duplicate id in a malformed feed) must not
-        // be walked again — this is what makes loops impossible.
-        case dict.has_key(resolved, node.file_id) {
-          True -> resolved
-          False -> {
-            let path = prefix <> name
-            let resolved = dict.insert(resolved, node.file_id, path)
-            case node.is_folder {
-              True ->
-                descend(node.file_id, path <> "/", children_by_parent, resolved)
-              False -> resolved
+  case worklist {
+    [] -> resolved
+    [#(folder_id, prefix), ..rest] -> {
+      let children = case dict.get(children_by_parent, folder_id) {
+        Ok(children) -> children
+        Error(Nil) -> []
+      }
+      let #(resolved, subfolders) =
+        list.fold(
+          assign_final_names(children),
+          #(resolved, []),
+          fn(state, child) {
+            let #(resolved, subfolders) = state
+            let #(node, name) = child
+            // A node already placed (duplicate id in a malformed feed, or a
+            // cycle that runs through the root) must not be walked again —
+            // this is what makes loops impossible.
+            case dict.has_key(resolved, node.file_id) {
+              True -> #(resolved, subfolders)
+              False -> {
+                let path = prefix <> name
+                let resolved = dict.insert(resolved, node.file_id, path)
+                case node.is_folder {
+                  True -> #(resolved, [
+                    #(node.file_id, path <> "/"),
+                    ..subfolders
+                  ])
+                  False -> #(resolved, subfolders)
+                }
+              }
             }
-          }
-        }
-      })
+          },
+        )
+      walk(list.append(subfolders, rest), children_by_parent, resolved)
+    }
   }
 }
 

@@ -1,5 +1,7 @@
 import gleam/dict
+import gleam/int
 import gleam/option.{None, Some}
+import gleam/string
 import iaragon/domain/paths.{RemoteNode}
 
 // Mapping Drive's id-based tree onto POSIX paths is lossy: names are not
@@ -91,6 +93,42 @@ pub fn duplicate_names_are_disambiguated_deterministically_test() {
 // another twin will receive. If the woven fallback is not itself checked for
 // freedom, two distinct fileIds collapse onto one local path — a silent
 // overwrite / dropped file. Every fileId must map to a DISTINCT path.
+// PENTEST — folder nesting depth is attacker-controlled (Drive imposes no
+// tight limit). Path resolution must be depth-independent: a pathologically
+// deep chain must resolve without growing the process stack until it dies.
+pub fn very_deep_nesting_resolves_without_a_stack_blowup_test() {
+  let depth = 200_000
+  let folders = build_folder_chain(depth - 1, [])
+  let leaf = a_file("leaf", "x.txt", "f" <> int.to_string(depth - 1))
+
+  let resolved = paths.resolve_paths([leaf, ..folders], root_id: "root")
+
+  let assert Ok(path) = dict.get(resolved, "leaf")
+  assert string.ends_with(path, "/x.txt")
+}
+
+/// A chain root -> f0 -> f1 -> ... -> f(index), each folder the sole child of
+/// the previous. Built tail-recursively so the test setup itself is not the
+/// thing that overflows.
+fn build_folder_chain(
+  index: Int,
+  acc: List(paths.RemoteNode),
+) -> List(paths.RemoteNode) {
+  case index < 0 {
+    True -> acc
+    False -> {
+      let parent = case index {
+        0 -> "root"
+        _ -> "f" <> int.to_string(index - 1)
+      }
+      build_folder_chain(index - 1, [
+        a_folder("f" <> int.to_string(index), "d", parent),
+        ..acc
+      ])
+    }
+  }
+}
+
 pub fn a_crafted_name_cannot_force_a_path_collision_test() {
   // Sorted by file_id: id-a, id-b, id-c.
   //  id-a "doc.txt"        -> "doc.txt"
