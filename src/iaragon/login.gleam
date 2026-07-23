@@ -49,7 +49,7 @@ fn run_login() -> Result(String, String) {
           <> "/oauth_client.json ("
           <> string.inspect(cause)
           <> "). Create it with your Desktop-app client_id and client_secret."
-        client_store.Corrupted(_) ->
+        client_store.Corrupted ->
           config_dir
           <> "/oauth_client.json must be JSON with client_id and client_secret"
       }

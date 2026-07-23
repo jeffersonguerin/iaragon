@@ -11,7 +11,9 @@ import simplifile
 
 pub type LoadError {
   Unreadable(cause: simplifile.FileError)
-  Corrupted(contents: String)
+  /// No payload: the file carries the client_secret, which must not reach a
+  /// log via an upstream `string.inspect`.
+  Corrupted
 }
 
 pub fn load_client(path: String) -> Result(OauthClient, LoadError) {
@@ -24,5 +26,5 @@ pub fn load_client(path: String) -> Result(OauthClient, LoadError) {
     decode.success(OauthClient(client_id:, client_secret:))
   }
   json.parse(from: contents, using: decoder)
-  |> result.replace_error(Corrupted(contents))
+  |> result.replace_error(Corrupted)
 }

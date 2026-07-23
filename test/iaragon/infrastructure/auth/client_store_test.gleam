@@ -29,5 +29,5 @@ pub fn a_corrupted_client_file_reports_corrupted_test() {
   let path = scratch_dir <> "/bad/oauth_client.json"
   let assert Ok(Nil) = simplifile.create_directory_all(scratch_dir <> "/bad")
   let assert Ok(Nil) = simplifile.write(to: path, contents: "{}")
-  assert client_store.load_client(path) == Error(client_store.Corrupted("{}"))
+  assert client_store.load_client(path) == Error(client_store.Corrupted)
 }

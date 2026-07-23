@@ -1,6 +1,9 @@
 //// Persists OAuth tokens as JSON on disk (default: under ~/.config/iaragon).
 //// The path is always injected, so tests never touch the real config dir.
-//// Tokens are secrets: the file is chmod 600 after every save.
+//// Tokens are secrets: the parent dir is 0700, the file is written 0600 via
+//// a temp-then-rename (atomic, never momentarily world-readable), and a
+//// corrupted file's contents are NEVER carried in the error value — an
+//// upstream `string.inspect` would otherwise print live tokens.
 
 import filepath
 import gleam/dynamic/decode
@@ -18,7 +21,9 @@ pub type StoredTokens {
 
 pub type LoadError {
   Unreadable(cause: simplifile.FileError)
-  Corrupted(contents: String)
+  /// No payload on purpose: the file contents are token material and must
+  /// never be carried where an upstream `string.inspect` could print them.
+  Corrupted
 }
 
 pub fn save_tokens(
@@ -33,8 +38,13 @@ pub fn save_tokens(
       #("expires_at_unix", json.int(tokens.expires_at_unix)),
     ])
     |> json.to_string
-  use Nil <- result.try(simplifile.write(to: path, contents: contents))
-  simplifile.set_permissions_octal(path, 0o600)
+  // Temp-then-rename: the real path only ever appears atomically, already
+  // 0600 — no window where a reader sees a half-written or world-readable
+  // token file (and the 0700 parent dir blocks other users regardless).
+  let temp = path <> ".tmp"
+  use Nil <- result.try(simplifile.write(to: temp, contents: contents))
+  use Nil <- result.try(simplifile.set_permissions_octal(temp, 0o600))
+  simplifile.rename(at: temp, to: path)
 }
 
 pub fn load_tokens(path: String) -> Result(StoredTokens, LoadError) {
@@ -48,9 +58,12 @@ pub fn load_tokens(path: String) -> Result(StoredTokens, LoadError) {
     decode.success(StoredTokens(access_token:, refresh_token:, expires_at_unix:))
   }
   json.parse(from: contents, using: decoder)
-  |> result.replace_error(Corrupted(contents))
+  |> result.replace_error(Corrupted)
 }
 
 fn create_parent_directory(path: String) -> Result(Nil, simplifile.FileError) {
-  simplifile.create_directory_all(filepath.directory_name(path))
+  let dir = filepath.directory_name(path)
+  use Nil <- result.try(simplifile.create_directory_all(dir))
+  // A secrets directory: owner-only, so the token-file window is moot.
+  simplifile.set_permissions_octal(dir, 0o700)
 }
