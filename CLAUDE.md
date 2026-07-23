@@ -703,6 +703,64 @@ erros OAuth sem payload, loopback 127.0.0.1 one-shot com packet_size + state
 CSRF + PKCE S256 (verifier nunca sai do processo; roubo do code é inútil sem
 ele), clamp de expires_in, temp do token dentro de dir já-0700.
 
+## Usabilidade, e2e e escala (sessão 21)
+
+Fase doctor: **`iaragon-doctor`** — health check passivo em 6 checks (oauth
+client, tokens com refresh REAL exercitado — pega a expiração de 7 dias do
+modo Testing antes do sync travar —, state.db via `count_known` novo (COUNT,
+não carrega o índice), liveness do daemon por 1 linha no status socket,
+espelho, watcher). Núcleo puro `application/diagnostics` (render + wording de
+expiração, testados); comando = composição fina como o login; exit ≠ 0 em
+falha. Launcher em install.sh/Formula; **timer systemd opcional**
+(`iaragon-doctor.timer`, diário, instalado mas não habilitado — rodar
+"automático" é o timer, NUNCA código no daemon: custo zero para o sync).
+`status_server.resolve_socket_path` extraído e compartilhado
+(daemon+doctor): `XDG_RUNTIME_DIR` VAZIO conta como ausente (paridade com o
+plugin Dolphin; antes o daemon tentaria bindar `/iaragon.sock`). FFI probe
+captura `badarg` do gen_tcp (path > ~107 bytes) como erro limpo. Unicode do
+stdout configurado no próprio doctor (launcher `erl -noshell` sai em latin1).
+
+Fase fricção OAuth: **login assistido** — sem `oauth_client.json`, o
+`iaragon-login` imprime o passo-a-passo completo do Google Cloud
+(`application/onboarding`, conteúdo fixado por teste: links diretos
+projectcreate / apis/library/drive / auth/branding / auth/clients /
+auth/audience, tipo "Desktop app", shape exato do JSON, armadilha dos 7
+dias + publicar "In production"). README com o mesmo guia. **Poller reporta
+streaks**: `report_trouble` injetado — UMA linha de journal quando uma
+sequência de falhas começa (razão verbatim) e UMA na recuperação; nunca
+linha-por-retry. A composição escreve o texto acionável no erro na origem
+("not logged in — run iaragon-login"; refresh falho com a dica dos 7 dias).
+
+Fase e2e sem credenciais: **fake Drive local** (FFI de teste
+`iaragon_fake_drive_ffi`: HTTP/1.1 multi-request keep-alive em porta
+efêmera, roteamento e payloads em Gleam). Fato verificado: Google NÃO tem
+sandbox/emulador oficial da Drive API. O teste sobe a ÁRVORE REAL
+(`start_daemon`) contra ele: httpc real (send injetado redirecionado a
+127.0.0.1 — a mesma costura de injeção da produção), parsers reais, FFI de
+download streaming real, cliente de upload resumable real (inclusive a
+validação googleapis da session URI — o fake devolve Location googleapis e
+o send redireciona). Cenário prova as duas direções: arquivo remoto chega
+byte a byte no espelho; arquivo criado localmente sobe com os bytes exatos.
+
+Fase escala (medido ANTES de otimizar; eprof nos BEAMs): 100k arquivos
+(1000 pastas × 100) — `resolve_paths` 3,1 s, `reconcile_all` steady state
+3,1 s, state_db ~44 µs/put (seed 100k ≈ 4,5 s única vez; write-through
+irrelevante). Perfil: ~30% do resolve era a dança de codepoints do
+`sanitize_segment` em nomes LIMPOS; 60% do reconcile eram 800k
+`dict.insert`, metade DUPLICADA (reconcile_all e infer_local_renames
+construíam os mesmos dois índices de 100k). Otimizações
+comportamento-preservantes: **fast path por scan de bytes** no sanitize
+(`/`, controles e DEL são single-byte em UTF-8 — nome limpo não aloca
+nada); **índices compartilhados** via `infer_renames_with` interno (o
+público `infer_local_renames` continua construindo os seus); **early-exit
+sem vanished** (nenhum known sumido localmente = nenhum rename possível =
+toda rodada steady-state — pula sets de paths e mapas de assinatura).
+Resultado: 1,4 s / 1,5 s (2× cada). `test/iaragon/scale/scale_test.gleam`
+fica de canário (100k, imprime wall time, trava correção — steady state =
+zero decisões). Sem O(n²) acidental; o custo restante é intrínseco de
+mapas funcionais nesse tamanho e aceitável (rodada de 30 s a 100k ≈ <10%
+de um core; Drives típicos ≤ 10k são triviais).
+
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
 - **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas

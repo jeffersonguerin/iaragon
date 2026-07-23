@@ -6,7 +6,7 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
 import gleam/int
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import iaragon/application/reconciler

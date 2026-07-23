@@ -131,7 +131,11 @@ pub fn reconcile_all(
   let remote_by_id =
     list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
 
-  let renames = infer_local_renames(locals, remotes, lasts)
+  // The two 100k-scale indexes above are exactly what rename inference needs
+  // too — share them instead of rebuilding (measured: at 100k files, the
+  // duplicate builds were half the steady-state round's map inserts).
+  let renames =
+    infer_renames_with(local_by_path, remote_by_id, locals, remotes, lasts)
 
   // Known files anchor the join: their file_id claims a remote and their
   // path claims a local file.
@@ -207,16 +211,16 @@ pub fn infer_local_renames(
     list.fold(locals, dict.new(), fn(acc, l) { dict.insert(acc, l.path, l) })
   let remote_by_id =
     list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
-  let known_paths =
-    list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
-  let remote_paths =
-    list.fold(remotes, set.new(), fn(acc, r) {
-      case r.trashed {
-        True -> acc
-        False -> set.insert(acc, r.path)
-      }
-    })
+  infer_renames_with(local_by_path, remote_by_id, locals, remotes, lasts)
+}
 
+fn infer_renames_with(
+  local_by_path: dict.Dict(String, LocalFile),
+  remote_by_id: dict.Dict(String, RemoteFile),
+  locals: List(LocalFile),
+  remotes: List(RemoteFile),
+  lasts: List(KnownFile),
+) -> dict.Dict(String, String) {
   let vanished =
     list.filter(lasts, fn(k) {
       // Folders are never rename candidates: the scan lists files only, so a
@@ -228,6 +232,30 @@ pub fn infer_local_renames(
       && case dict.get(remote_by_id, k.file_id) {
         Ok(r) -> !r.trashed && r.path == k.path && !detect_remote_change(r, k)
         Error(Nil) -> False
+      }
+    })
+  // No vanished known means no rename is possible — and that is every
+  // steady-state round. Exit before building the path sets and signature
+  // maps, which at 100k files would dominate the round for nothing.
+  case vanished {
+    [] -> dict.new()
+    vanished -> match_vanished_to_fresh(vanished, locals, remotes, lasts)
+  }
+}
+
+fn match_vanished_to_fresh(
+  vanished: List(KnownFile),
+  locals: List(LocalFile),
+  remotes: List(RemoteFile),
+  lasts: List(KnownFile),
+) -> dict.Dict(String, String) {
+  let known_paths =
+    list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
+  let remote_paths =
+    list.fold(remotes, set.new(), fn(acc, r) {
+      case r.trashed {
+        True -> acc
+        False -> set.insert(acc, r.path)
       }
     })
   let fresh_locals =
