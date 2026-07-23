@@ -35,7 +35,9 @@ fn an_idle_drive_port() -> remote_poller.DrivePort {
   remote_poller.DrivePort(
     fetch_start_page_token: fn() { Ok("tok-boot") },
     fetch_mirror_snapshot: fn() { Ok(#("root-1", [])) },
-    fetch_all_changes: fn(_page_token) { Error("not under test") },
+    fetch_all_changes: fn(_page_token) {
+      Error(remote_poller.ChangesFailed("not under test"))
+    },
   )
 }
 

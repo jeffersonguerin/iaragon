@@ -31,16 +31,26 @@ pub type Command {
 }
 
 /// What the poller needs from the Drive client, already composed with
-/// authentication. Errors are strings: the poller only retries, it does not
-/// interpret them.
+/// authentication. Seed/snapshot errors are strings: the poller only retries
+/// them. Changes-fetch errors are typed because ONE of them — a rejected page
+/// token — needs a different response (re-seed, not blind retry).
 pub type DrivePort {
   DrivePort(
     fetch_start_page_token: fn() -> Result(String, String),
     /// Real root id + full files.list snapshot.
     fetch_mirror_snapshot: fn() ->
       Result(#(String, List(RemoteSighting)), String),
-    fetch_all_changes: fn(String) -> Result(#(List(Change), String), String),
+    fetch_all_changes: fn(String) ->
+      Result(#(List(Change), String), ChangesError),
   )
+}
+
+/// Why a changes fetch failed. A stale page token (persisted token too old or
+/// rejected — HTTP 400/410) means the poller must discard it and re-seed;
+/// anything else is a transient failure to retry with backoff.
+pub type ChangesError {
+  StalePageToken
+  ChangesFailed(reason: String)
 }
 
 pub type PollerConfig {
@@ -119,35 +129,73 @@ fn handle_command(
         None -> Nil
       }
       let outcome = case state.seeded {
-        False -> seed_mirror(state.config)
+        False -> to_outcome(seed_mirror(state.config))
         True -> advance_changes(state.config)
       }
       case outcome {
-        Ok(Nil) -> {
-          let timer =
-            process.send_after(state.self, state.config.poll_interval_ms, Poll)
-          actor.continue(
-            State(
-              ..state,
-              failed_attempts: 0,
-              seeded: True,
-              scheduled_poll: Some(timer),
-            ),
-          )
-        }
-        Error(_reason) -> {
-          let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
-          let timer = process.send_after(state.self, delay, Poll)
-          actor.continue(
-            State(
-              ..state,
-              failed_attempts: state.failed_attempts + 1,
-              scheduled_poll: Some(timer),
-            ),
-          )
-        }
+        Advanced -> continue_after_success(state)
+        Transient -> continue_after_backoff(state)
+        StaleToken -> recover_stale_token(state)
       }
     }
+  }
+}
+
+/// A poll cycle's result: succeeded, a transient failure to back off from, or
+/// a rejected page token that forces a re-seed.
+type Outcome {
+  Advanced
+  Transient
+  StaleToken
+}
+
+fn to_outcome(result: Result(Nil, String)) -> Outcome {
+  case result {
+    Ok(Nil) -> Advanced
+    Error(_reason) -> Transient
+  }
+}
+
+fn continue_after_success(state: State) -> actor.Next(State, Command) {
+  let timer =
+    process.send_after(state.self, state.config.poll_interval_ms, Poll)
+  actor.continue(
+    State(
+      ..state,
+      failed_attempts: 0,
+      seeded: True,
+      scheduled_poll: Some(timer),
+    ),
+  )
+}
+
+fn continue_after_backoff(state: State) -> actor.Next(State, Command) {
+  let delay = state.config.pick_retry_delay_ms(state.failed_attempts)
+  let timer = process.send_after(state.self, delay, Poll)
+  actor.continue(
+    State(
+      ..state,
+      failed_attempts: state.failed_attempts + 1,
+      scheduled_poll: Some(timer),
+    ),
+  )
+}
+
+/// The persisted page token was rejected: fetch a fresh startPageToken, drop
+/// the stale one, and force a full re-seed next cycle (an unknown number of
+/// changes may have been missed while the token was too old). If the fresh
+/// token can't be fetched, back off — the stale token stays persisted so the
+/// next advance re-detects it and returns here.
+fn recover_stale_token(state: State) -> actor.Next(State, Command) {
+  case state.config.drive.fetch_start_page_token() {
+    Ok(fresh) -> {
+      process.send(state.config.state_owner, state_owner.SetPageToken(fresh))
+      process.send(state.self, Poll)
+      actor.continue(
+        State(..state, seeded: False, failed_attempts: 0, scheduled_poll: None),
+      )
+    }
+    Error(_reason) -> continue_after_backoff(state)
   }
 }
 
@@ -189,22 +237,35 @@ fn ensure_page_token(config: PollerConfig) -> Result(Nil, String) {
   }
 }
 
-fn advance_changes(config: PollerConfig) -> Result(Nil, String) {
+fn advance_changes(config: PollerConfig) -> Outcome {
   let assert Some(page_token) =
     process.call(config.state_owner, 5000, state_owner.GetPageToken)
-  use #(changes, fresh_token) <- result.try(config.drive.fetch_all_changes(
-    page_token,
-  ))
-  // Deliver BEFORE advancing the token: if the reconciler is momentarily
-  // unregistered, report a transient error so the token is not advanced and
-  // these changes are re-fetched (and re-delivered) on the retry.
-  use Nil <- result.try(case changes {
-    [] -> Ok(Nil)
-    changes ->
-      deliver(config, reconciler.ApplyRemoteChanges(translate_changes(changes)))
-  })
-  process.send(config.state_owner, state_owner.SetPageToken(fresh_token))
-  Ok(Nil)
+  case config.drive.fetch_all_changes(page_token) {
+    Error(StalePageToken) -> StaleToken
+    Error(ChangesFailed(_reason)) -> Transient
+    Ok(#(changes, fresh_token)) -> {
+      // Deliver BEFORE advancing the token: if the reconciler is momentarily
+      // unregistered, keep the token so the changes are re-fetched on retry.
+      let delivered = case changes {
+        [] -> Ok(Nil)
+        changes ->
+          deliver(
+            config,
+            reconciler.ApplyRemoteChanges(translate_changes(changes)),
+          )
+      }
+      case delivered {
+        Error(_reason) -> Transient
+        Ok(Nil) -> {
+          process.send(
+            config.state_owner,
+            state_owner.SetPageToken(fresh_token),
+          )
+          Advanced
+        }
+      }
+    }
+  }
 }
 
 /// Map the Drive wire format onto the application's intake contract.

@@ -175,11 +175,27 @@ fn build_drive_port(config_dir: String) -> remote_poller.DrivePort {
       Ok(#(root_id, list.map(files, remote_poller.translate_file)))
     },
     fetch_all_changes: fn(page_token) {
-      use access_token <- result.try(obtain_access_token(config_dir))
-      changes.fetch_all_changes(send_over_httpc, access_token, page_token)
-      |> result.map_error(string.inspect)
+      case obtain_access_token(config_dir) {
+        Error(reason) -> Error(remote_poller.ChangesFailed(reason))
+        Ok(access_token) ->
+          changes.fetch_all_changes(send_over_httpc, access_token, page_token)
+          |> result.map_error(classify_changes_error)
+      }
     },
   )
+}
+
+/// A page token Drive rejects surfaces as HTTP 400 (invalidPageToken) or 410
+/// (gone); the request is otherwise fixed and valid, so treat those as a stale
+/// token to re-seed. Everything else is a transient failure to retry.
+fn classify_changes_error(
+  error: changes.DriveError,
+) -> remote_poller.ChangesError {
+  case error {
+    changes.RefusedByServer(400, _body) | changes.RefusedByServer(410, _body) ->
+      remote_poller.StalePageToken
+    other -> remote_poller.ChangesFailed(string.inspect(other))
+  }
 }
 
 fn obtain_access_token(config_dir: String) -> Result(String, String) {

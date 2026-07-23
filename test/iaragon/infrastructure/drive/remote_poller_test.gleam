@@ -202,6 +202,33 @@ pub fn polling_repeats_on_the_configured_interval_test() {
     process.receive(deliver, 1000)
 }
 
+pub fn a_stale_page_token_reseeds_instead_of_looping_test() {
+  // A persisted token that Drive rejects (too old / invalid) must not be
+  // retried forever: the poller fetches a fresh startPageToken, persists it,
+  // and re-seeds with a full snapshot (an unknown number of changes may have
+  // been missed while the token was stale).
+  let owner = start_state_owner()
+  process.send(owner, state_owner.SetPageToken("stale-tok"))
+  let deliver = process.new_subject()
+  let port =
+    DrivePort(
+      ..a_port(),
+      fetch_start_page_token: fn() { Ok("fresh-tok") },
+      fetch_all_changes: fn(_page_token) { Error(remote_poller.StalePageToken) },
+    )
+  let poller = start_poller(owner, deliver, port, idle_interval)
+
+  // First cycle seeds against the (still-present) stale token.
+  let assert Ok(reconciler.SeedMirror("root-1", _)) =
+    process.receive(deliver, 1000)
+
+  // Next cycle advances, the token is rejected, and the poller re-seeds.
+  process.send(poller, remote_poller.Poll)
+  let assert Ok(reconciler.SeedMirror("root-1", _)) =
+    process.receive(deliver, 2000)
+  assert wait_for_page_token(owner, Some("fresh-tok"))
+}
+
 pub fn an_unregistered_reconciler_does_not_crash_the_poller_test() {
   let owner = start_state_owner()
   // The reconciler starts AFTER the poller in the supervision tree, so at
