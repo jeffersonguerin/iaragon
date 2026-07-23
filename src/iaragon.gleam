@@ -42,6 +42,11 @@ pub fn main() -> Nil {
   let assert Ok(db) = state_db.open(data_dir <> "/state.db")
 
   let config_dir = home <> "/.config/iaragon"
+  // Same guard as the data dir: the config dir holds oauth_client.json and
+  // tokens.json. save_tokens only tightens it when a login writes; a daemon
+  // running before (or without) a login would otherwise leave the
+  // user-created dir world-readable.
+  let assert Ok(Nil) = client_store.protect_config_dir(config_dir)
   let mirror_root = home <> "/GoogleDrive"
   let assert Ok(_daemon) =
     supervision.start_daemon(

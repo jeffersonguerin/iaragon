@@ -20,6 +20,43 @@ pub fn loads_the_oauth_client_from_json_test() {
     ))
 }
 
+// The config dir holds the client secret and, after login, the tokens.
+// save_tokens already tightens the dir when it writes — but before the first
+// successful login (or on a daemon that runs without ever logging in) the
+// user-created dir sits at the umask default, world-readable. protect must
+// close that window from BOTH entry points (login and daemon boot).
+
+pub fn protecting_tightens_a_lax_dir_and_client_file_test() {
+  let dir = scratch_dir <> "/protect_lax"
+  let path = dir <> "/oauth_client.json"
+  let assert Ok(Nil) = simplifile.create_directory_all(dir)
+  let assert Ok(Nil) = simplifile.set_permissions_octal(dir, 0o755)
+  let assert Ok(Nil) = simplifile.write(to: path, contents: "{}")
+  let assert Ok(Nil) = simplifile.set_permissions_octal(path, 0o644)
+
+  let assert Ok(Nil) = client_store.protect_config_dir(dir)
+
+  let assert Ok(dir_info) = simplifile.file_info(dir)
+  assert simplifile.file_info_permissions_octal(dir_info) == 0o700
+  let assert Ok(file_info) = simplifile.file_info(path)
+  assert simplifile.file_info_permissions_octal(file_info) == 0o600
+}
+
+pub fn protecting_creates_a_missing_dir_owner_only_test() {
+  let dir = scratch_dir <> "/protect_fresh/nested"
+  let assert Ok(Nil) = client_store.protect_config_dir(dir)
+  let assert Ok(dir_info) = simplifile.file_info(dir)
+  assert simplifile.file_info_permissions_octal(dir_info) == 0o700
+}
+
+pub fn protecting_succeeds_when_the_client_file_is_absent_test() {
+  let dir = scratch_dir <> "/protect_no_client"
+  let assert Ok(Nil) = simplifile.create_directory_all(dir)
+  let assert Ok(Nil) = client_store.protect_config_dir(dir)
+  let assert Ok(dir_info) = simplifile.file_info(dir)
+  assert simplifile.file_info_permissions_octal(dir_info) == 0o700
+}
+
 pub fn a_missing_client_file_reports_unreadable_test() {
   let assert Error(client_store.Unreadable(_)) =
     client_store.load_client(scratch_dir <> "/missing/oauth_client.json")

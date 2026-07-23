@@ -16,6 +16,23 @@ pub type LoadError {
   Corrupted
 }
 
+/// Closes the pre-first-login window: save_tokens only tightens the config
+/// dir when it writes, so until a login completes (or on a daemon that runs
+/// without one) the user-created dir sits at the umask default and
+/// oauth_client.json is world-readable. Called from both entry points —
+/// login start and daemon boot. The dir is the real guard (0700 blocks other
+/// users regardless of each file's mode); the client file's own 0600 is
+/// defence in depth, skipped when the user hasn't created it yet.
+pub fn protect_config_dir(dir: String) -> Result(Nil, simplifile.FileError) {
+  use Nil <- result.try(simplifile.create_directory_all(dir))
+  use Nil <- result.try(simplifile.set_permissions_octal(dir, 0o700))
+  let client_path = dir <> "/oauth_client.json"
+  case simplifile.is_file(client_path) {
+    Ok(True) -> simplifile.set_permissions_octal(client_path, 0o600)
+    Ok(False) | Error(_) -> Ok(Nil)
+  }
+}
+
 pub fn load_client(path: String) -> Result(OauthClient, LoadError) {
   use contents <- result.try(
     simplifile.read(from: path) |> result.map_error(Unreadable),

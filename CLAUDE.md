@@ -684,6 +684,25 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
   "iaragon@@main:run(iaragon)" -noshell`. E2e validado clonando `main`,
   compilando e rodando ambos launchers.
 
+Fase revisão final de credenciais (sessão 20): resposta ao "o que protege o
+JSON do OAuth de um serviço malicioso?" — a fronteira é o modelo Unix de
+usuário: `~/.config/iaragon` 0700 + `tokens.json` 0600 (temp+rename) bloqueiam
+qualquer OUTRO UID (inclusive contas de serviço); processo malicioso rodando
+COMO O MESMO usuário lê 0600 por definição — mesmo modelo de gcloud/gh/rclone/
+Drive for Desktop (keyring não muda isso num desktop destravado). Achado
+corrigido (TDD): **janela pré-primeiro-login** — só o `save_tokens` apertava o
+dir; antes do primeiro login concluído (ou daemon rodando sem login) o dir
+criado pelo usuário ficava no umask default (0755) com `oauth_client.json`
+0644 legível por outros UIDs. `client_store.protect_config_dir` (dir 0700 +
+client 0600 se existir) chamado nos DOIS pontos de entrada: início do
+`run_login` e boot do daemon. Negativo verificado: injeção de escape ANSI via
+`MalformedRedirect(target)` impressa no terminal do login NÃO é explorável —
+`string.inspect` escapa controle (`\u{001B}`), confirmado empiricamente.
+Reconfirmados nesta passada: segredos só em corpo POST HTTPS (nunca query),
+erros OAuth sem payload, loopback 127.0.0.1 one-shot com packet_size + state
+CSRF + PKCE S256 (verifier nunca sai do processo; roubo do code é inútil sem
+ele), clamp de expires_in, temp do token dentro de dir já-0700.
+
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
 - **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas

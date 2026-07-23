@@ -39,6 +39,15 @@ fn run_login() -> Result(String, String) {
     envoy.get("HOME") |> result.replace_error("HOME is not set"),
   )
   let config_dir = home <> "/.config/iaragon"
+  // Before anything else: the dir will hold the client secret and, after this
+  // run, the tokens — owner-only from the start, not only after the first
+  // save_tokens.
+  use Nil <- result.try(
+    client_store.protect_config_dir(config_dir)
+    |> result.map_error(fn(cause) {
+      "cannot restrict " <> config_dir <> " (" <> string.inspect(cause) <> ")"
+    }),
+  )
   use client <- result.try(
     client_store.load_client(config_dir <> "/oauth_client.json")
     |> result.map_error(fn(error) {
