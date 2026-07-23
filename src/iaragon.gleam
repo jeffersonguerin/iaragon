@@ -27,6 +27,7 @@ import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/drive/upload
 import iaragon/infrastructure/fs/emblems
+import iaragon/infrastructure/overlay/status_server
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
 import simplifile
@@ -63,14 +64,8 @@ pub fn main() -> Nil {
   process.sleep_forever()
 }
 
-/// Where the file-manager plugin looks for the daemon, in the SAME order:
-/// the user runtime dir when the session provides one, the data dir
-/// otherwise. Keep in sync with integrations/dolphin.
 fn resolve_status_socket_path(data_dir: String) -> String {
-  case envoy.get("XDG_RUNTIME_DIR") {
-    Ok(runtime_dir) -> runtime_dir <> "/iaragon.sock"
-    Error(Nil) -> data_dir <> "/status.sock"
-  }
+  status_server.resolve_socket_path(envoy.get("XDG_RUNTIME_DIR"), data_dir)
 }
 
 fn build_transfer_ops(config_dir: String) -> transfer_pool.DriveTransferOps {

@@ -108,6 +108,33 @@ State lives in `~/.local/share/iaragon/state.db` (SQLite). The status
 socket binds at `$XDG_RUNTIME_DIR/iaragon.sock` (or
 `~/.local/share/iaragon/status.sock`).
 
+## Health check
+
+`iaragon-doctor` verifies the whole setup in one shot — OAuth client,
+login/refresh token (it exercises the real refresh, catching the 7-day
+"Testing" expiry before the sync silently stalls), state database, daemon
+liveness (via the status socket), mirror directory and watcher backend:
+
+```
+✓ oauth client  configured (~/.config/iaragon/oauth_client.json)
+✓ tokens        refresh works; access token valid until 2026-07-23T13:00:00Z
+✓ state         1382 files indexed; page token present
+✓ daemon        answering on /run/user/1000/iaragon.sock
+✓ mirror        ~/GoogleDrive exists
+✓ watcher       inotifywait found (real-time events)
+
+all checks passed
+```
+
+It is entirely passive (reads files, one line on the status socket), so it
+never disturbs the running daemon, and it exits non-zero on any failure.
+For an automatic daily check in the journal, enable the bundled timer:
+
+```sh
+systemctl --user enable --now iaragon-doctor.timer
+journalctl --user -u iaragon-doctor    # reports land here
+```
+
 ## Development
 
 One-time setup — points git at the versioned hooks (local CI):

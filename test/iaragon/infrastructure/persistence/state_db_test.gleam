@@ -96,3 +96,13 @@ pub fn the_page_token_starts_absent_and_round_trips_test() {
   let assert Ok(Nil) = state_db.save_page_token(db, "tok-2")
   assert state_db.load_page_token(db) == Ok(Some("tok-2"))
 }
+
+// The doctor reports the index size without loading every row into memory —
+// a COUNT is the whole query.
+pub fn counting_knowns_reports_the_index_size_test() {
+  use db <- with_db
+  assert state_db.count_known(db) == Ok(0)
+  let assert Ok(Nil) = state_db.put_known(db, a_known("id-1", "a.txt"))
+  let assert Ok(Nil) = state_db.put_known(db, a_known("id-2", "b.txt"))
+  assert state_db.count_known(db) == Ok(2)
+}

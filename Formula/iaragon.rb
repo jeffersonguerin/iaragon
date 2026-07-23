@@ -51,6 +51,12 @@ class Iaragon < Formula
       # iaragon interactive OAuth login launcher
       exec "#{erl}" -pa "#{libexec}"/*/ebin -noshell -eval 'iaragon@login:main(), halt(0)' -extra "$@"
     SH
+
+    (bin/"iaragon-doctor").write <<~SH
+      #!/bin/sh
+      # iaragon health check launcher
+      exec "#{erl}" -pa "#{libexec}"/*/ebin -noshell -eval 'iaragon@doctor:main(), halt(0)' -extra "$@"
+    SH
   end
 
   def caveats

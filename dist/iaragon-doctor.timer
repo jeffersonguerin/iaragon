@@ -1,0 +1,18 @@
+# systemd *user* timer: run the iaragon health check once a day.
+#
+# Opt in with:
+#   systemctl --user enable --now iaragon-doctor.timer
+#
+# Persistent=true catches up a run missed while the machine was off;
+# RandomizedDelaySec avoids every machine probing at the same instant.
+
+[Unit]
+Description=iaragon — daily health check
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

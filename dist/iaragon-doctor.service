@@ -1,0 +1,18 @@
+# systemd *user* unit: one health-check run (`iaragon-doctor`).
+#
+# Passive — reads config/state files and makes one query to the daemon's
+# status socket; it never disturbs the daemon. Exits non-zero when a check
+# fails (e.g. a dead refresh token), so a timer'd run shows up as a failed
+# unit in `systemctl --user list-units` and the report lands in the journal:
+#   journalctl --user -u iaragon-doctor
+#
+# Paired with iaragon-doctor.timer; the installer rewrites ExecStart for a
+# non-default prefix.
+
+[Unit]
+Description=iaragon — health check (iaragon-doctor)
+Documentation=https://github.com/jeffersonguerin/iaragon
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/iaragon-doctor

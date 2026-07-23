@@ -19,6 +19,21 @@ fn serve_status_lines(
   answer: fn(String) -> String,
 ) -> Result(Pid, String)
 
+/// Where the socket lives — the ONE resolution shared by the daemon and the
+/// doctor, mirroring the Dolphin plugin: the user runtime dir when the
+/// session provides one, the data dir otherwise. An empty XDG_RUNTIME_DIR
+/// counts as absent (the plugin's isEmpty check) — never the filesystem
+/// root. Keep in sync with integrations/dolphin.
+pub fn resolve_socket_path(
+  runtime_dir: Result(String, Nil),
+  data_dir: String,
+) -> String {
+  case runtime_dir {
+    Ok("") | Error(Nil) -> data_dir <> "/status.sock"
+    Ok(dir) -> dir <> "/iaragon.sock"
+  }
+}
+
 pub fn supervised(
   sock_path: String,
   answer: fn(String) -> String,

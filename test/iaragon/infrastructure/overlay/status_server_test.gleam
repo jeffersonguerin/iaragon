@@ -79,3 +79,22 @@ pub fn a_stale_socket_file_is_replaced_on_start_test() {
 
   assert query_lines(sock, ["/whatever"]) == Ok(["synced"])
 }
+
+// Where the socket lives — ONE resolution shared by the daemon and the
+// doctor, matching the Dolphin plugin: the user runtime dir when the session
+// provides one, the data dir otherwise. An EMPTY XDG_RUNTIME_DIR counts as
+// absent (the plugin's isEmpty check), never as the filesystem root.
+pub fn the_socket_path_prefers_the_runtime_dir_test() {
+  assert status_server.resolve_socket_path(Ok("/run/user/1000"), "/data")
+    == "/run/user/1000/iaragon.sock"
+}
+
+pub fn the_socket_path_falls_back_to_the_data_dir_test() {
+  assert status_server.resolve_socket_path(Error(Nil), "/data")
+    == "/data/status.sock"
+}
+
+pub fn an_empty_runtime_dir_counts_as_absent_test() {
+  assert status_server.resolve_socket_path(Ok(""), "/data")
+    == "/data/status.sock"
+}

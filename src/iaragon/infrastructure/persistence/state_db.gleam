@@ -159,6 +159,23 @@ pub fn load_page_token(db: Database) -> Result(Option(String), sqlight.Error) {
   Ok(list.first(rows) |> option.from_result)
 }
 
+/// How many files the index tracks. A COUNT so the doctor never pays for
+/// loading the whole index just to report its size.
+pub fn count_known(db: Database) -> Result(Int, sqlight.Error) {
+  use rows <- result.try(
+    sqlight.query(
+      "SELECT COUNT(*) FROM known_files",
+      on: db.connection,
+      with: [],
+      expecting: {
+        use total <- decode.field(0, decode.int)
+        decode.success(total)
+      },
+    ),
+  )
+  Ok(list.first(rows) |> result.unwrap(0))
+}
+
 const select_known_sql = "
   SELECT file_id, path, remote_modified_time, md5, size, local_mtime_seconds,
          kind, shortcut_target
