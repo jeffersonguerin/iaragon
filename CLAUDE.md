@@ -761,6 +761,34 @@ zero decisões). Sem O(n²) acidental; o custo restante é intrínseco de
 mapas funcionais nesse tamanho e aceitável (rodada de 30 s a 100k ≈ <10%
 de um core; Drives típicos ≤ 10k são triviais).
 
+Fase perf de runtime (sessão 21, continuação): benchmarks do que a fase de
+escala NÃO cobria — o runtime. FFI de teste `iaragon_bench_ffi`
+(`peak_binary_memory`: sampler do pico de `erlang:memory(binary)` durante um
+closure — binários grandes são refc/off-heap, é onde conteúdo de arquivo
+aparece; `deep_size_bytes`: `erts_debug:size` do termo). Medido:
+- **local_scan** 10k arquivos reais: ~200-800 ms (I/O; canário <10 s) —
+  a rodada de 30 s comporta o scan com folga até ~100k.
+- **Pipeline inteiro** (`start_daemon` real contra o fake Drive): 1000
+  arquivos semeados → espelho convergido em ~1,3 s ≈ **1,3 ms/arquivo**
+  (pool serial sobre loopback; primeiro sync de 100k ≈ 2-3 min de overhead
+  de pipeline — rede real domina).
+- **Modelo remoto a 100k**: 23 MiB de heap (dict de RemoteSighting medido
+  com erts_debug) — leve; canário <500 MiB.
+- **Download streaming** 32 MiB: pico binário +0 MiB (o `{stream, path}`
+  não segura payload no cliente) — fixado por assert.
+- **Upload resumable** 32 MiB (chunks 10 MiB): pico ≈ 2 chunks, limitado
+  pelo chunk e nunca pelo arquivo — fixado por assert.
+- **ACHADO CORRIGIDO (TDD): md5 slurpava o arquivo inteiro** —
+  `hash_mirror_file` fazia `read_bits` do arquivo todo (pico +32 MiB num
+  arquivo de 32 MiB; um blob de 5 GB nunca-sincado = 5 GB de heap no
+  momento em que o reconciler hasheia gêmeos). Reescrito em janelas de
+  1 MiB sobre o MESMO `chunked_read` do upload + hasher incremental do
+  gleam_crypto (`new_hasher`/`hash_chunk`/`digest`); pico agora +1 MiB
+  (uma janela), independente do tamanho. Teste de perf trava a
+  propriedade (pico < 4 MiB).
+Os benchmarks vivem em `test/iaragon/perf/` e imprimem os números a cada
+run; asserts são canários generosos (propriedades, não micro-tempos).
+
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 
 - **Erlang/OTP ≥ 26 obrigatório em runtime**: o OTP 25 do apt compila, mas
