@@ -12,6 +12,10 @@ pub type DownloadError {
   RefusedByServer(status: Int)
 }
 
+/// Reserved per-folder control directory for in-flight partial downloads;
+/// the local scan skips it. Must match `local_scan`'s own constant.
+const partial_dir_name = ".iaragon-partial"
+
 pub fn build_media_url(file_id: String) -> String {
   "https://www.googleapis.com/drive/v3/files/"
   <> uri.percent_encode(file_id)
@@ -35,8 +39,14 @@ pub fn fetch_file_to_disk(
   destination destination: String,
   timeout_ms timeout_ms: Int,
 ) -> Result(Nil, DownloadError) {
+  let directory = filepath.directory_name(destination)
+  // Partials live in a reserved control dir INSIDE the destination's folder:
+  // the scan skips `.iaragon-partial/` wholesale, and a rename within the
+  // same folder is atomic (same filesystem). Keeping the original basename
+  // avoids the length blow-up a flattened name would cause for deep paths.
+  let partial_dir = directory <> "/" <> partial_dir_name
   use Nil <- result.try(
-    simplifile.create_directory_all(filepath.directory_name(destination))
+    simplifile.create_directory_all(partial_dir)
     |> result.map_error(fn(error) {
       TransportFailed(
         "cannot create directory: " <> simplifile.describe_error(error),
@@ -46,7 +56,7 @@ pub fn fetch_file_to_disk(
   // httpc's {stream, path} APPENDS to an existing file, so bytes go to a
   // partial file that atomically replaces the destination only on success —
   // a crashed download never leaves a half-written mirror file behind.
-  let partial = destination <> ".iaragon-partial"
+  let partial = partial_dir <> "/" <> filepath.base_name(destination)
   let _ = simplifile.delete(partial)
   case download_to_file(url, "Bearer " <> access_token, partial, timeout_ms) {
     Ok(Nil) ->

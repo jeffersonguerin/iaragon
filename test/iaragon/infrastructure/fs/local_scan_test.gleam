@@ -27,15 +27,34 @@ pub fn files_are_listed_recursively_with_relative_paths_test() {
   assert mtime_b > 0
 }
 
-pub fn partial_download_files_are_ignored_test() {
+// In-flight downloads live in a reserved `.iaragon-partial/` control
+// directory; the scan skips that directory wholesale (a structural
+// exclusion by location, not a name-suffix heuristic).
+pub fn the_partial_download_directory_is_ignored_test() {
   let root = scratch_dir <> "/partials"
-  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) =
+    simplifile.create_directory_all(root <> "/.iaragon-partial")
   let assert Ok(Nil) = simplifile.write(to: root <> "/ok.txt", contents: "x")
   let assert Ok(Nil) =
-    simplifile.write(to: root <> "/big.bin.iaragon-partial", contents: "half")
+    simplifile.write(to: root <> "/.iaragon-partial/big.bin", contents: "half")
 
   let assert Ok(scanned) = local_scan.scan_mirror(root)
   assert list.map(scanned, fn(file) { file.path }) == ["ok.txt"]
+}
+
+// A real Drive file whose name merely ends in `.iaragon-partial` must sync
+// normally — the old name-suffix exclusion hid it forever and re-downloaded
+// it every round.
+pub fn a_real_file_named_like_a_partial_is_synced_test() {
+  let root = scratch_dir <> "/lookalike"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/notes.iaragon-partial", contents: "real")
+
+  let assert Ok(scanned) = local_scan.scan_mirror(root)
+  assert list.map(scanned, fn(file) { file.path }) == ["notes.iaragon-partial"]
 }
 
 // Symlinks inside the mirror are NOT followed: a link would otherwise get
