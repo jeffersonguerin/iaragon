@@ -869,6 +869,49 @@ pub fn a_local_rename_dispatches_a_remote_move_test() {
   assert expect_no_transfers(dispatches)
 }
 
+pub fn a_rename_candidate_with_different_content_is_not_moved_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(
+    owner,
+    state_owner.PutKnown(a_synced_known("id-1", "report.txt")),
+  )
+  // Same size+mtime as the known, but an unrelated file: its on-demand hash
+  // disagrees with the known's md5, so it must NOT rename the remote onto
+  // it — the old remote trashes and the new file uploads instead.
+  let impostor =
+    LocalFile(
+      path: "docs/renamed.txt",
+      size: 42,
+      mtime_seconds: 1000,
+      md5: None,
+    )
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [impostor], Ok("different-md5"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [
+      a_folder_sighting("id-docs", "docs", "root"),
+      a_sighting("id-1", "report.txt", "root"),
+    ]),
+  )
+
+  let dispatched = receive_transfers(dispatches, 3)
+  assert !list.any(dispatched, fn(d) {
+    case d {
+      MoveRemoteDispatched(_) -> True
+      _ -> False
+    }
+  })
+  assert list.any(dispatched, fn(d) { d == TrashDispatched("id-1") })
+  assert list.any(dispatched, fn(d) {
+    case d {
+      UploadDispatched(plan) -> plan.local.path == "docs/renamed.txt"
+      _ -> False
+    }
+  })
+}
+
 pub fn a_settled_remote_move_stops_being_dispatched_test() {
   let owner = fakes.start_ephemeral_state_owner()
   process.send(

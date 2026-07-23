@@ -346,6 +346,7 @@ fn run_round(state: State) -> State {
     |> dict.from_list
 
   let locals = hash_never_synced_twins(config, locals, remotes, known_by_path)
+  let locals = hash_rename_candidates(config, locals, remotes, known)
   let locals_by_path =
     locals
     |> list.map(fn(local) { #(local.path, local) })
@@ -722,6 +723,36 @@ fn classify_sighting(sighting: RemoteSighting) -> Option(entry.FileKind) {
         False -> Some(Blob)
       }
   }
+}
+
+/// A local rename is inferred from size+mtime alone, which two unrelated
+/// files can collide on. Hash exactly the candidate destinations so the
+/// domain's authoritative md5 check (`content_compatible`) can reject a
+/// false pair — renaming the wrong remote onto an unrelated file would
+/// silently corrupt the remote. Cheap: only the size+mtime candidates are
+/// hashed, and only if not already hashed.
+fn hash_rename_candidates(
+  config: ReconcilerConfig,
+  locals: List(LocalFile),
+  remotes: List(RemoteFile),
+  known: List(entry.KnownFile),
+) -> List(LocalFile) {
+  let candidate_paths =
+    reconcile.infer_local_renames(locals, remotes, known)
+    |> dict.fold(dict.new(), fn(acc, _file_id, to_path) {
+      dict.insert(acc, to_path, Nil)
+    })
+
+  list.map(locals, fn(local) {
+    case dict.has_key(candidate_paths, local.path) && local.md5 == None {
+      False -> local
+      True ->
+        case config.hash_local_file(local.path) {
+          Ok(md5) -> LocalFile(..local, md5: Some(md5))
+          Error(_) -> local
+        }
+    }
+  })
 }
 
 /// A local file sitting where a never-synced remote lands can only be told

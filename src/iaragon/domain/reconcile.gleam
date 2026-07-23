@@ -127,8 +127,7 @@ pub fn reconcile_all(
   let remote_by_id =
     list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
 
-  let renames =
-    infer_local_renames(locals, remotes, lasts, local_by_path, remote_by_id)
+  let renames = infer_local_renames(locals, remotes, lasts)
 
   // Known files anchor the join: their file_id claims a remote and their
   // path claims a local file.
@@ -190,14 +189,20 @@ pub fn reconcile_all(
 /// locals (no known, no remote at their path) by the cheap signature that a
 /// `mv` preserves: size + mtime. Only UNIQUE one-to-one signature matches
 /// count — anything ambiguous falls back to delete-plus-create, which is
-/// always safe, just wasteful.
-fn infer_local_renames(
+/// always safe, just wasteful. When both sides carry an md5 the checksum is
+/// authoritative (see `content_compatible`), so the caller can hash the
+/// candidate locals to reject unrelated files that merely collide on the
+/// signature. Public so the application can do exactly that before the
+/// second, authoritative pass in `reconcile_all`. Returns file_id → new path.
+pub fn infer_local_renames(
   locals: List(LocalFile),
   remotes: List(RemoteFile),
   lasts: List(KnownFile),
-  local_by_path: dict.Dict(String, LocalFile),
-  remote_by_id: dict.Dict(String, RemoteFile),
 ) -> dict.Dict(String, String) {
+  let local_by_path =
+    list.fold(locals, dict.new(), fn(acc, l) { dict.insert(acc, l.path, l) })
+  let remote_by_id =
+    list.fold(remotes, dict.new(), fn(acc, r) { dict.insert(acc, r.file_id, r) })
   let known_paths =
     list.fold(lasts, set.new(), fn(acc, k) { set.insert(acc, k.path) })
   let remote_paths =
@@ -237,10 +242,25 @@ fn infer_local_renames(
 
   dict.fold(vanished_by_signature, dict.new(), fn(acc, signature, knowns) {
     case knowns, dict.get(fresh_by_signature, signature) {
-      [known], Ok([local]) -> dict.insert(acc, known.file_id, local.path)
+      [known], Ok([local]) ->
+        case content_compatible(known, local) {
+          True -> dict.insert(acc, known.file_id, local.path)
+          // Same cheap signature, but the checksums prove different content:
+          // an unrelated file that merely collided. Fall back to
+          // delete-plus-create (the caller hashes candidates so this md5 is
+          // present; without it the size+mtime match stands).
+          False -> acc
+        }
       _, _ -> acc
     }
   })
+}
+
+fn content_compatible(known: KnownFile, local: LocalFile) -> Bool {
+  case known.md5, local.md5 {
+    Some(known_md5), Some(local_md5) -> known_md5 == local_md5
+    _, _ -> True
+  }
 }
 
 fn collect_by_signature(

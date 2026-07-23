@@ -405,6 +405,21 @@ pub fn an_ambiguous_rename_falls_back_to_delete_and_create_test() {
   assert list.contains(decisions, UploadLocal("b.txt"))
 }
 
+pub fn a_signature_match_with_different_content_is_not_a_rename_test() {
+  // Same size+mtime as the known (the cheap signature collides) but a
+  // different checksum: an unrelated file must NOT rename the remote onto
+  // it. When both sides carry an md5, it is authoritative.
+  let impostor =
+    LocalFile(..a_local(), path: "docs/renamed.txt", md5: Some("zzz"))
+  let decisions = reconcile.reconcile_all([impostor], [a_remote()], [a_known()])
+  assert list.contains(decisions, DeleteRemote("id-1"))
+  assert list.contains(decisions, UploadLocal("docs/renamed.txt"))
+  assert !list.contains(
+    decisions,
+    MoveRemote("id-1", "docs/report.txt", "docs/renamed.txt"),
+  )
+}
+
 pub fn a_signature_mismatch_is_not_a_rename_test() {
   let different = LocalFile(..a_local(), path: "docs/renamed.txt", size: 99)
   let decisions =

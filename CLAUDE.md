@@ -395,10 +395,16 @@ ESTREITA: edição DURANTE o stream de um download longo — o rename atômico
 acontece dentro do `download.gleam`; fechar exige um guard pré-rename lá
 (a maior janela, a de espera-na-fila, está fechada).
 
+Fase hardening — verificação de conteúdo no rename (sessão 15, resolvido):
+**o rename local agora confirma o md5** antes de confiar na assinatura
+size+mtime. `reconcile.infer_local_renames` (agora público) checa
+`content_compatible` — quando ambos os lados têm md5, o checksum é
+autoritativo; o reconciler hasheia os candidatos (`hash_rename_candidates`)
+ANTES do `reconcile_all`, então um arquivo não-relacionado que só colide na
+assinatura é rejeitado (cai no delete+create seguro) em vez de renomear o
+remoto errado. Hash falho → fallback ao size+mtime (comportamento antigo).
+
 Residuais rastreados (não perda-de-dados silenciosa; documentados):
-- **infer_local_renames sem verificação de CONTEÚDO**: dois arquivos
-  não-relacionados com size+mtime idênticos (raro) podem parear e renomear
-  o remoto errado; a verificação exigiria hash (I/O) fora do domínio puro.
 - **OTP best-effort**: `signal_status`/`locate_known` podem derrubar
   pool/board se o alvo estiver reiniciando (send a nome não-registrado
   explode no remetente); e `pending_*` do reconciler não são limpos no DOWN
