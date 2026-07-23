@@ -353,6 +353,44 @@ pub fn a_local_rename_becomes_a_remote_move_test() {
     == [MoveRemote("id-1", "docs/report.txt", "docs/renamed.txt")]
 }
 
+pub fn a_synced_folder_is_never_inferred_as_a_renamed_file_test() {
+  // The scan never lists directories, so a synced folder ALWAYS looks
+  // locally vanished. Without excluding folders, a fresh local file whose
+  // (size, mtime) happens to match the folder's known signature would be
+  // paired with it and the whole remote folder renamed onto that file.
+  let folder_known =
+    KnownFile(
+      ..a_known(),
+      file_id: "id-docs",
+      path: "docs",
+      md5: None,
+      size: 4096,
+      local_mtime_seconds: 1000,
+      kind: entry.Folder,
+    )
+  let folder_remote =
+    RemoteFile(
+      ..a_remote(),
+      file_id: "id-docs",
+      name: "docs",
+      path: "docs",
+      mime_type: "application/vnd.google-apps.folder",
+      size: None,
+      md5: None,
+      kind: entry.Folder,
+    )
+  // A fresh local file sharing the folder's signature.
+  let new_local =
+    LocalFile(path: "new.bin", size: 4096, mtime_seconds: 1000, md5: None)
+
+  let decisions =
+    reconcile.reconcile_all([new_local], [folder_remote], [folder_known])
+
+  // No move of the folder; the new file just uploads.
+  assert !list.contains(decisions, MoveRemote("id-docs", "docs", "new.bin"))
+  assert list.contains(decisions, UploadLocal("new.bin"))
+}
+
 pub fn an_ambiguous_rename_falls_back_to_delete_and_create_test() {
   // Two identical-looking new locals: no way to tell which one is the
   // rename. Fall back to the safe behaviour.

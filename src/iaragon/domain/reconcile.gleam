@@ -210,7 +210,12 @@ fn infer_local_renames(
 
   let vanished =
     list.filter(lasts, fn(k) {
-      !dict.has_key(local_by_path, k.path)
+      // Folders are never rename candidates: the scan lists files only, so a
+      // synced folder ALWAYS looks locally vanished, and pairing it with a
+      // fresh file of matching (size, mtime) would rename the whole remote
+      // folder onto that file.
+      k.kind != entry.Folder
+      && !dict.has_key(local_by_path, k.path)
       && case dict.get(remote_by_id, k.file_id) {
         Ok(r) -> !r.trashed && r.path == k.path && !detect_remote_change(r, k)
         Error(Nil) -> False
