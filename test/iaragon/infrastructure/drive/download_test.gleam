@@ -140,8 +140,10 @@ pub fn an_unreachable_server_reports_transport_failure_test() {
 }
 
 pub fn media_urls_point_at_the_files_endpoint_test() {
+  // acknowledgeAbuse lets an abuse-flagged (but user-owned) file download
+  // instead of failing every round.
   assert download.build_media_url("id-42")
-    == "https://www.googleapis.com/drive/v3/files/id-42?alt=media"
+    == "https://www.googleapis.com/drive/v3/files/id-42?alt=media&acknowledgeAbuse=true"
 }
 
 // Export MIME types contain a `/` (and `+` in some formats), so the query

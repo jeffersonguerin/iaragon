@@ -17,9 +17,12 @@ pub type DownloadError {
 const partial_dir_name = ".iaragon-partial"
 
 pub fn build_media_url(file_id: String) -> String {
+  // acknowledgeAbuse: a file Drive flagged as abusive (malware/spam) refuses
+  // to download without this, failing every sync round forever. It is the
+  // user's own mirrored file, so acknowledge and pull the bytes.
   "https://www.googleapis.com/drive/v3/files/"
   <> uri.percent_encode(file_id)
-  <> "?alt=media"
+  <> "?alt=media&acknowledgeAbuse=true"
 }
 
 /// Native-doc export (`files/{id}/export`). Same streaming download as

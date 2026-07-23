@@ -120,6 +120,8 @@ pub fn a_middle_page_parses_changes_and_next_token_test() {
   // Defaults are undocumented; the daemon must pin these explicitly.
   assert list.key_find(params, "includeRemoved") == Ok("true")
   assert list.key_find(params, "restrictToMyDrive") == Ok("true")
+  // The max page size (default is 100): fewer requests, less quota.
+  assert list.key_find(params, "pageSize") == Ok("1000")
   // The projection must ask for everything the parser reads.
   let assert Ok(fields) = list.key_find(params, "fields")
   assert string.contains(fields, "shortcutDetails(targetId)")

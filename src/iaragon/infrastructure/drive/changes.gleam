@@ -90,6 +90,8 @@ pub fn fetch_changes_page(
       #("pageToken", page_token),
       #("includeRemoved", "true"),
       #("restrictToMyDrive", "true"),
+      // Max page size (default 100): fewer round trips, less quota spend.
+      #("pageSize", "1000"),
       #(
         "fields",
         "newStartPageToken,nextPageToken,changes(fileId,removed,"
