@@ -1,6 +1,7 @@
 import gleam/option.{None, Some}
 import iaragon/domain/entry.{Blob, GoogleNative, KnownFile, Shortcut}
 import iaragon/infrastructure/persistence/state_db
+import simplifile
 
 fn with_db(run: fn(state_db.Database) -> a) -> a {
   let assert Ok(db) = state_db.open(":memory:")
@@ -17,6 +18,21 @@ fn a_known(file_id: String, path: String) -> entry.KnownFile {
     local_mtime_seconds: 1000,
     kind: Blob,
   )
+}
+
+// PENTEST — the state DB maps every fileId to its path plus metadata: the
+// user's entire Drive tree. World-readable, it discloses that tree to any
+// local user. The DB file must be created owner-only (0600).
+pub fn the_state_db_file_is_owner_only_test() {
+  let dir = "build/test-scratch/state_db_perms"
+  let path = dir <> "/state.db"
+  let _ = simplifile.delete(path)
+  let assert Ok(Nil) = simplifile.create_directory_all(dir)
+
+  let assert Ok(_db) = state_db.open(path)
+
+  let assert Ok(info) = simplifile.file_info(path)
+  assert simplifile.file_info_permissions_octal(info) == 0o600
 }
 
 pub fn known_files_survive_a_put_get_round_trip_test() {

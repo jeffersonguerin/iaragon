@@ -35,6 +35,10 @@ pub fn main() -> Nil {
   let assert Ok(home) = envoy.get("HOME")
   let data_dir = home <> "/.local/share/iaragon"
   let assert Ok(Nil) = simplifile.create_directory_all(data_dir)
+  // Owner-only: the data dir holds the state DB (the whole Drive tree index)
+  // and the status socket. 0700 blocks other local users from reaching any of
+  // it, regardless of each file's own mode.
+  let assert Ok(Nil) = simplifile.set_permissions_octal(data_dir, 0o700)
   let assert Ok(db) = state_db.open(data_dir <> "/state.db")
 
   let config_dir = home <> "/.config/iaragon"

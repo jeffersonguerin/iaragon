@@ -12,6 +12,7 @@ import iaragon/application/state_owner
 import iaragon/domain/entry.{
   type KnownFile, Blob, Folder, GoogleNative, KnownFile, Shortcut,
 }
+import simplifile
 import sqlight
 
 pub type Database {
@@ -40,6 +41,11 @@ const create_schema = "
 pub fn open(path: String) -> Result(Database, sqlight.Error) {
   use connection <- result.try(sqlight.open(path))
   use Nil <- result.try(sqlight.exec(create_schema, connection))
+  // The DB indexes the user's entire Drive tree (every fileId↔path plus
+  // metadata); a world-readable file would disclose it to other local users.
+  // Lock it to the owner. Best-effort: an in-memory (":memory:") DB has no
+  // file, and the composition root also restricts the parent dir to 0700.
+  let _ = simplifile.set_permissions_octal(path, 0o600)
   Ok(Database(connection))
 }
 
