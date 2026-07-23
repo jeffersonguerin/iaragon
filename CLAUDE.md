@@ -471,9 +471,61 @@ parametrizadas; parsing de int64-como-string crash-safe; CSRF/state e PKCE
 (S256, verifier CSPRNG) corretos; segredos sem payload em erros; path
 traversal (`sanitize_segment`) cobre os vetores reais no alvo Linux;
 emblems FFI sem shell (argv vector); delete não-recursivo p/ blob; scan
-pula symlink. Não-corrigido (robustez/quota, não segurança): arquivo
-remoto literalmente nomeado `*.iaragon-partial` fica invisível ao scan
-(exclusão por nome) → re-download por rodada; documentado.
+pula symlink.
+
+**Resíduo do `.iaragon-partial` resolvido (sessão 17)**: downloads vão
+agora para um diretório de controle reservado `.iaragon-partial/` DENTRO da
+pasta do destino, e o scan pula esse diretório por LOCALIZAÇÃO (não mais por
+sufixo de nome). Um arquivo remoto literalmente terminado em
+`.iaragon-partial` sincroniza normal. Rename no mesmo diretório segue
+atômico; manter o basename original evita estouro de comprimento de nome em
+paths fundos.
+
+Fase pentest de segurança (sessão 17): 3 subagentes em superfícies não
+cobertas antes (upload resumable/mutate, token/OAuth sob respostas hostis,
+parsers JSON + resolução de paths sob grafo malicioso). Verificado que
+`resolve_paths` TERMINA sob ciclo de parents (guard de visitados + grafo
+funcional de parent único — negativo importante). Corrigido, cada um com
+pentest TDD:
+- **Colisão de desambiguação em paths (HIGH)**: `assign_final_names` tecia o
+  file_id num nome duplicado mas não re-checava o resultado; um colaborador
+  num Drive compartilhado lê os fileIds e forja um irmão cujo nome natural
+  == nome tecido de outro → dois fileIds no MESMO path → overwrite
+  silencioso. Agora aplica variantes numeradas (disciplina da cópia
+  conflitada) até um nome livre.
+- **Vazamento de token em erro OAuth (MED-HIGH)**: `RefusedByServer(status,
+  body)`/`UnexpectedPayload(body)` carregavam a resposta do token endpoint;
+  o login faz `string.inspect` no stderr → token vivo vazava. Variantes agora
+  sem payload (disciplina do `Corrupted`).
+- **SSRF via Location no upload resumable (MED-HIGH)**: a session URI do
+  header vinha usada sem validar; resposta hostil redirecionava os BYTES do
+  arquivo p/ host do atacante. Agora só aceita HTTPS em `*.googleapis.com`
+  antes de qualquer PUT. (Bearer NÃO vaza — o PUT não leva Authorization.)
+- **file_id sem encode no write path (MED)**: `mutate.rename_file`/
+  `trash_file` e o `UpdateFile` do upload concatenavam file_id cru →
+  injeção de query em chamada MUTANTE (ex. addParents/removeParents num
+  trash). `uri.percent_encode` nos três.
+- **expires_in sem limite (MED)**: valor astronômico fixava o token como
+  "nunca expira" → auto-refresh nunca dispara → sync trava em silêncio.
+  Clampado a `[0, 86400]` no parse.
+- **Paginação O(n²)/ilimitada (MED)**: `changes`/`listing` usavam
+  `list.append` no acumulador (O(n²)) sem cap → CPU quadrática + heap sem
+  limite; feed que só devolve nextPageToken loopava eterno. Agora prepend +
+  `reverse` no fim (O(n), ordem preservada) + cap de páginas (erro limpo, o
+  poller re-tenta).
+- **sanitize_segment sem controle (LOW)**: NUL/control chars passavam p/ o
+  segmento → op de arquivo trunca/erra. Substituídos por `_` (< 0x20 e 0x7f).
+
+Residuais rastreados desta rodada (documentados, não perda-de-dados):
+- **`descend` não é tail-recursivo (P3, LOW-MED)**: profundidade de
+  aninhamento controlada pelo atacante cresce o stack do processo; BEAM
+  cresce stack dinamicamente (10k níveis sobrevive), mas centenas de milhares
+  viram DoS de memória/latência no reconciler. Fix = travessia por worklist
+  explícito — refactor da resolução correção-crítica, para sessão dedicada.
+- **Upload de arquivo 0-byte falha (U3, LOW)**: `send_chunks` vê EndOfFile no
+  byte 0 e erra; 0-byte nunca sobe. Correção exige o protocolo resumable de
+  0-byte (`Content-Range: bytes */0`) — verificar na doc oficial antes
+  (regra: não inventar API). Não é segurança.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
