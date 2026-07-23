@@ -60,12 +60,13 @@ fn start_poller(
 
 const idle_interval = 60_000
 
-pub fn the_first_poll_bootstraps_the_token_and_seeds_the_mirror_test() {
+pub fn the_poller_seeds_on_its_own_without_an_external_kick_test() {
+  // The poller self-kicks on init: nothing external needs to send Poll, so
+  // a supervisor restart resumes polling on its own (the crash that would
+  // otherwise stop remote→local sync forever).
   let owner = start_state_owner()
   let deliver = process.new_subject()
-  let poller = start_poller(owner, deliver, a_port(), idle_interval)
-
-  process.send(poller, remote_poller.Poll)
+  let _poller = start_poller(owner, deliver, a_port(), idle_interval)
 
   assert process.receive(deliver, 1000)
     == Ok(reconciler.SeedMirror("root-1", [a_sighting("id-1")]))
@@ -84,7 +85,6 @@ pub fn a_restart_with_a_persisted_token_still_seeds_first_test() {
     )
   let poller = start_poller(owner, deliver, port, idle_interval)
 
-  process.send(poller, remote_poller.Poll)
   let assert Ok(reconciler.SeedMirror("root-1", _)) =
     process.receive(deliver, 1000)
 
@@ -121,7 +121,6 @@ pub fn changed_files_are_translated_into_observations_test() {
     )
   let poller = start_poller(owner, deliver, port, idle_interval)
 
-  process.send(poller, remote_poller.Poll)
   let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)
 
   process.send(poller, remote_poller.Poll)
@@ -146,7 +145,6 @@ pub fn an_empty_change_list_advances_without_delivering_test() {
     )
   let poller = start_poller(owner, deliver, port, idle_interval)
 
-  process.send(poller, remote_poller.Poll)
   let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)
 
   process.send(poller, remote_poller.Poll)
@@ -163,10 +161,9 @@ pub fn a_failed_seed_is_retried_until_it_succeeds_test() {
       Ok(#("root-1", [a_sighting("id-1")])),
     ])
   let port = DrivePort(..a_port(), fetch_mirror_snapshot: fn() { outcomes() })
-  let poller = start_poller(owner, deliver, port, idle_interval)
+  let _poller = start_poller(owner, deliver, port, idle_interval)
 
-  process.send(poller, remote_poller.Poll)
-
+  // Auto-kick seeds; the first attempt fails and the retry succeeds.
   let assert Ok(reconciler.SeedMirror("root-1", _)) =
     process.receive(deliver, 2000)
 }
@@ -175,7 +172,6 @@ pub fn a_reseed_request_makes_the_next_cycle_seed_again_test() {
   let owner = start_state_owner()
   let deliver = process.new_subject()
   let poller = start_poller(owner, deliver, a_port(), idle_interval)
-  process.send(poller, remote_poller.Poll)
   let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)
 
   // The reconciler lost its model (restart) and asks for a fresh seed.
@@ -196,9 +192,7 @@ pub fn polling_repeats_on_the_configured_interval_test() {
       fetch_start_page_token: fn() { panic as "token already known" },
       fetch_all_changes: fn(_page_token) { Ok(#([Removed("id-1")], "tok-2")) },
     )
-  let poller = start_poller(owner, deliver, port, 25)
-
-  process.send(poller, remote_poller.Poll)
+  let _poller = start_poller(owner, deliver, port, 25)
 
   // Seed on the first cycle, then interval-driven change deliveries.
   let assert Ok(reconciler.SeedMirror(_, _)) = process.receive(deliver, 1000)

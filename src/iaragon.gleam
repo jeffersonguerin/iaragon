@@ -39,7 +39,7 @@ pub fn main() -> Nil {
 
   let config_dir = home <> "/.config/iaragon"
   let mirror_root = home <> "/GoogleDrive"
-  let assert Ok(daemon) =
+  let assert Ok(_daemon) =
     supervision.start_daemon(
       store: state_db.build_state_store(db),
       drive: build_drive_port(config_dir),
@@ -49,8 +49,8 @@ pub fn main() -> Nil {
       signal_status: emblems.build_status_painter(mirror_root),
       status_socket_path: resolve_status_socket_path(data_dir),
     )
-  // Kick the pipeline: seed on the first cycle, then poll every interval.
-  process.send(daemon.remote_poller, remote_poller.Poll)
+  // The poller self-kicks on start (and on every supervisor restart); the
+  // daemon just needs to stay alive.
   process.sleep_forever()
 }
 

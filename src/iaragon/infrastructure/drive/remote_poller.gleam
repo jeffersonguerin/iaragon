@@ -77,13 +77,22 @@ pub fn start(
   name: Name(Command),
   config: PollerConfig,
 ) -> actor.StartResult(Subject(Command)) {
-  actor.new(State(
-    config: config,
-    self: process.named_subject(name),
-    failed_attempts: 0,
-    seeded: False,
-    scheduled_poll: None,
-  ))
+  actor.new_with_initialiser(1000, fn(subject) {
+    // Self-kick so polling (re)starts on every boot AND every supervisor
+    // restart — nothing external re-sends Poll after a crash, so without
+    // this a single transient poller crash would stop remote→local sync
+    // until the whole daemon restarts.
+    process.send(subject, Poll)
+    actor.initialised(State(
+      config: config,
+      self: process.named_subject(name),
+      failed_attempts: 0,
+      seeded: False,
+      scheduled_poll: None,
+    ))
+    |> actor.returning(subject)
+    |> Ok
+  })
   |> actor.on_message(handle_command)
   |> actor.named(name)
   |> actor.start

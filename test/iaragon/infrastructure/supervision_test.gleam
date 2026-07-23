@@ -64,15 +64,8 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       status_socket_path: status_sock,
     )
 
-  // No page token yet, so the first poll bootstraps one through the tree:
-  // poller → drive port → state owner.
-  assert process.call(
-      daemon.state_owner,
-      call_timeout,
-      state_owner.GetPageToken,
-    )
-    == None
-  process.send(daemon.remote_poller, remote_poller.Poll)
+  // The poller self-kicks on start and bootstraps a page token through the
+  // tree: poller → drive port → state owner. No external Poll needed.
   assert wait_for_page_token(daemon.state_owner, Some("tok-boot"))
 
   // The state owner does real (in-memory) work: page token round-trip…
