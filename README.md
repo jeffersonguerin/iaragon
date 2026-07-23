@@ -67,6 +67,11 @@ The `pre-commit` hook refuses any commit that is unformatted or has a red
 suite, making the project rule — every commit green — mechanical.
 Emergency bypass: `git commit --no-verify`.
 
+For [Claude Code](https://claude.com/claude-code) users, the checked-in
+plugin at `.claude/skills/gleam-lsp/` wires the Gleam language server
+(`gleam lsp`) into the session automatically: diagnostics after every
+edit, go-to-definition, hover.
+
 Strict TDD; the suite is the specification:
 
 ```sh

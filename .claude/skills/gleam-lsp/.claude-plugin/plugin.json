@@ -1,0 +1,4 @@
+{
+  "name": "gleam-lsp",
+  "description": "Gleam language server (gleam lsp) for Claude Code: diagnostics after edits, go-to-definition, hover."
+}

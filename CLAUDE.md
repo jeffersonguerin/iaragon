@@ -464,3 +464,12 @@ state errado invalida qualquer resultado; httpc `{stream, path}` faz append
   emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
   do shell chamador); commits via ferramenta precisam do
   `export PATH=/opt/otp27/bin:$PATH` no mesmo comando.
+- **LSP do Gleam para Claude Code (sessão 16)**: plugin versionado em
+  `.claude/skills/gleam-lsp/` (`.claude-plugin/plugin.json` + `.lsp.json`
+  com `command: gleam, args: [lsp], extensionToLanguage: {".gleam":
+  "gleam"}`). Fato verificado na doc oficial: `.lsp.json` na RAIZ do
+  projeto NÃO é lido — LSP é config de plugin; o diretório
+  `.claude/skills/` do repo carrega automático (trust gate) na PRÓXIMA
+  sessão. Não usar `restartOnCrash`/`shutdownTimeout` (exigem CC ≥
+  2.1.205; em versões anteriores a presença deles faz o servidor ser
+  PULADO). Sem LSP para os `.erl` (erlang_ls não instalado; FFI é fino).
