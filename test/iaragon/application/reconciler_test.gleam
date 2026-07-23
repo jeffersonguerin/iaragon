@@ -72,7 +72,7 @@ fn start_reconciler_with_interval(
       name,
       ReconcilerConfig(
         state_owner: owner,
-        dispatch_download: fn(remote) {
+        dispatch_download: fn(remote, _expected) {
           process.send(dispatches, DownloadDispatched(remote))
         },
         dispatch_delete_local: fn(known: entry.KnownFile) {

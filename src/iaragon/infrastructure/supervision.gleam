@@ -148,10 +148,10 @@ pub fn start_daemon(
   let reconciler_config =
     reconciler.ReconcilerConfig(
       state_owner: process.named_subject(state_owner_name),
-      dispatch_download: fn(remote) {
+      dispatch_download: fn(remote, expected) {
         process.send(
           transfer_pool_subject,
-          transfer_pool.EnqueueDownload(remote),
+          transfer_pool.EnqueueDownload(remote, expected),
         )
       },
       dispatch_delete_local: fn(known) {

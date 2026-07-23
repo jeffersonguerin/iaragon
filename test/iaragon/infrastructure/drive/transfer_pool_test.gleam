@@ -130,7 +130,10 @@ pub fn a_downloaded_blob_is_recorded_as_known_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "docs/report.txt")),
+    transfer_pool.EnqueueDownload(
+      a_remote("id-1", "docs/report.txt"),
+      option.None,
+    ),
   )
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
@@ -143,13 +146,48 @@ pub fn a_downloaded_blob_is_recorded_as_known_test() {
   assert known.kind == Blob
 }
 
+pub fn a_download_is_skipped_when_the_local_was_edited_since_the_decision_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/download-edited"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/doc.txt", contents: "my local edit")
+  let fetch = fn(_id, dest) {
+    let assert Ok(Nil) = simplifile.write(to: dest, contents: "REMOTE BYTES")
+    Ok(Nil)
+  }
+  let pool = start_pool_with(a_pool_config(root, owner, fetch))
+  // The decision assumed the last-synced bytes (size 5, mtime 1000); the
+  // file was edited after the decision, so it no longer matches.
+  let stale_known =
+    entry.KnownFile(
+      ..a_known_at("id-1", "doc.txt"),
+      size: 5,
+      local_mtime_seconds: 1000,
+    )
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(
+      a_remote("id-1", "doc.txt"),
+      Some(stale_known),
+    ),
+  )
+
+  // The edit survives: the download does not overwrite it (the next round
+  // turns it into an edit-edit conflict, preserving both versions).
+  process.sleep(150)
+  assert simplifile.read(root <> "/doc.txt") == Ok("my local edit")
+}
+
 pub fn a_folder_is_created_and_recorded_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let #(pool, root) = start_pool("folder", owner, a_working_fetch())
   let folder =
     RemoteFile(..a_remote("id-f", "docs"), size: None, md5: None, kind: Folder)
 
-  process.send(pool, transfer_pool.EnqueueDownload(folder))
+  process.send(pool, transfer_pool.EnqueueDownload(folder, option.None))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-f") != None })
   assert simplifile.is_directory(root <> "/docs") == Ok(True)
@@ -169,7 +207,7 @@ pub fn a_native_doc_becomes_a_link_file_test() {
       kind: GoogleNative,
     )
 
-  process.send(pool, transfer_pool.EnqueueDownload(native))
+  process.send(pool, transfer_pool.EnqueueDownload(native, option.None))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-doc") != None })
   let assert Ok(contents) = simplifile.read(root <> "/notes.desktop")
@@ -209,7 +247,7 @@ pub fn a_native_doc_is_exported_under_the_office_policy_test() {
       kind: GoogleNative,
     )
 
-  process.send(pool, transfer_pool.EnqueueDownload(native))
+  process.send(pool, transfer_pool.EnqueueDownload(native, option.None))
 
   let assert Ok(ExportCalled("id-doc", export_mime)) =
     process.receive(events, 1000)
@@ -239,7 +277,7 @@ pub fn a_native_without_document_export_stays_a_link_under_export_policy_test() 
       kind: GoogleNative,
     )
 
-  process.send(pool, transfer_pool.EnqueueDownload(drawing))
+  process.send(pool, transfer_pool.EnqueueDownload(drawing, option.None))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-draw") != None })
   let assert Ok(contents) = simplifile.read(root <> "/sketch.desktop")
@@ -257,7 +295,7 @@ pub fn a_shortcut_links_to_its_target_test() {
       kind: Shortcut("id-target"),
     )
 
-  process.send(pool, transfer_pool.EnqueueDownload(shortcut))
+  process.send(pool, transfer_pool.EnqueueDownload(shortcut, option.None))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-s") != None })
   let assert Ok(contents) = simplifile.read(root <> "/link.desktop")
@@ -268,7 +306,7 @@ pub fn deleting_locally_removes_the_file_and_forgets_it_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let #(pool, root) = start_pool("delete", owner, a_working_fetch())
   let remote = a_remote("id-1", "old.txt")
-  process.send(pool, transfer_pool.EnqueueDownload(remote))
+  process.send(pool, transfer_pool.EnqueueDownload(remote, option.None))
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
 
   // The reconciler passes the known it looked up; its metadata matches the
@@ -326,7 +364,10 @@ pub fn a_download_signals_syncing_then_synced_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "docs/report.txt")),
+    transfer_pool.EnqueueDownload(
+      a_remote("id-1", "docs/report.txt"),
+      option.None,
+    ),
   )
 
   assert process.receive(statuses, 1000)
@@ -379,7 +420,7 @@ pub fn a_download_that_burns_its_retries_signals_failure_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "doomed.txt")),
+    transfer_pool.EnqueueDownload(a_remote("id-1", "doomed.txt"), option.None),
   )
 
   // One Syncing per attempt; the give-up marks the failure visibly.
@@ -481,7 +522,7 @@ pub fn failed_downloads_are_retried_until_success_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "flaky.txt")),
+    transfer_pool.EnqueueDownload(a_remote("id-1", "flaky.txt"), option.None),
   )
 
   assert fakes.retry_until(80, fn() { known_of(owner, "id-1") != None })
@@ -1118,7 +1159,7 @@ pub fn downloads_that_keep_failing_are_dropped_not_crashed_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "never.txt")),
+    transfer_pool.EnqueueDownload(a_remote("id-1", "never.txt"), option.None),
   )
   // Give the retries time to burn out, then prove the pool is still alive
   // and never recorded the failed download.
@@ -1128,6 +1169,6 @@ pub fn downloads_that_keep_failing_are_dropped_not_crashed_test() {
   // A folder needs no fetch: if it lands, the pool survived the give-up.
   let probe =
     RemoteFile(..a_remote("id-2", "alive"), size: None, md5: None, kind: Folder)
-  process.send(pool, transfer_pool.EnqueueDownload(probe))
+  process.send(pool, transfer_pool.EnqueueDownload(probe, option.None))
   assert fakes.retry_until(40, fn() { known_of(owner, "id-2") != None })
 }

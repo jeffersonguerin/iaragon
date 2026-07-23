@@ -127,7 +127,10 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       trashed: False,
       kind: entry.Folder,
     )
-  process.send(daemon.transfer_pool, transfer_pool.EnqueueDownload(probe))
+  process.send(
+    daemon.transfer_pool,
+    transfer_pool.EnqueueDownload(probe, option.None),
+  )
   assert retry_until(40, fn() {
     process.call(daemon.state_owner, call_timeout, state_owner.GetKnown(
       "id-probe",

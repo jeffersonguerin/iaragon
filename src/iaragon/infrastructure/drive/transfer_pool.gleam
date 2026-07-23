@@ -40,7 +40,12 @@ import iaragon/infrastructure/drive/upload.{type UploadTarget}
 import simplifile
 
 pub type Command {
-  EnqueueDownload(remote: RemoteFile)
+  /// Download/materialise a remote file. `expected` is the known the
+  /// decision assumed on disk (None for a brand-new remote): the pool
+  /// re-checks a blob's destination against it before overwriting, so a
+  /// local edit that landed after the decision is not clobbered (the next
+  /// round turns it into a conflict instead).
+  EnqueueDownload(remote: RemoteFile, expected: option.Option(entry.KnownFile))
   /// Delete the mirror copy the reconciler decided is gone remotely. Carries
   /// the expected known so the pool can re-verify a blob still matches it
   /// right before deleting — a file edited between the decision and here is
@@ -61,7 +66,11 @@ pub type Command {
   /// creating any missing destination folders first — no bytes transferred.
   EnqueueMoveRemote(plan: MoveRemotePlan)
   /// Internal: scheduled retries of failed transfers.
-  RetryDownload(remote: RemoteFile, failed_attempts: Int)
+  RetryDownload(
+    remote: RemoteFile,
+    expected: option.Option(entry.KnownFile),
+    failed_attempts: Int,
+  )
   RetryUpload(plan: UploadPlan, failed_attempts: Int)
   RetryTrash(file_id: String, failed_attempts: Int)
   RetryConflictCopy(remote: RemoteFile, copy_path: String, failed_attempts: Int)
@@ -156,9 +165,10 @@ fn handle_command(
   command: Command,
 ) -> actor.Next(State, Command) {
   case command {
-    EnqueueDownload(remote) -> run_download(state, remote, 0)
-    RetryDownload(remote, failed_attempts) ->
-      run_download(state, remote, failed_attempts)
+    EnqueueDownload(remote, expected) ->
+      run_download(state, remote, expected, 0)
+    RetryDownload(remote, expected, failed_attempts) ->
+      run_download(state, remote, expected, failed_attempts)
     EnqueueDeleteLocal(known) -> {
       run_delete_local(state.config, known)
       actor.continue(state)
@@ -243,8 +253,7 @@ fn run_delete_local(config: TransferConfig, known: entry.KnownFile) -> Nil {
 fn blob_still_matches(target: String, known: entry.KnownFile) -> Bool {
   case simplifile.file_info(target) {
     Ok(info) ->
-      info.size == known.size
-      && info.mtime_seconds == known.local_mtime_seconds
+      info.size == known.size && info.mtime_seconds == known.local_mtime_seconds
     Error(_) -> True
   }
 }
@@ -455,26 +464,61 @@ fn pick_free_variant(
 fn run_download(
   state: State,
   remote: RemoteFile,
+  expected: option.Option(entry.KnownFile),
   failed_attempts: Int,
 ) -> actor.Next(State, Command) {
-  state.config.signal_status(remote.path, entry.Syncing)
-  case materialize(state.config, remote) {
-    Ok(Nil) -> {
-      record_downloaded(state.config, remote)
-      actor.continue(state)
+  // Protect a blob whose local copy changed since the decision: overwriting
+  // it would silently lose the edit (the domain would have made it a
+  // conflict). Skip and let the next round re-decide. (Folders, native
+  // links and shortcuts are not user content, and natives are download-only
+  // by policy, so they are always (re)materialised.)
+  case remote.kind, safe_to_overwrite(state.config, remote.path, expected) {
+    Blob, False -> actor.continue(state)
+    _, _ -> {
+      state.config.signal_status(remote.path, entry.Syncing)
+      case materialize(state.config, remote) {
+        Ok(Nil) -> {
+          record_downloaded(state.config, remote)
+          actor.continue(state)
+        }
+        Error(_reason) -> {
+          // Dropped after the last attempt: the next round re-decides it.
+          retry_or(
+            state,
+            failed_attempts,
+            fn(attempts) { RetryDownload(remote, expected, attempts) },
+            give_up: fn() {
+              state.config.signal_status(remote.path, entry.SyncFailed)
+            },
+          )
+          actor.continue(state)
+        }
+      }
     }
-    Error(_reason) -> {
-      // Dropped after the last attempt: the next round re-decides it.
-      retry_or(
-        state,
-        failed_attempts,
-        fn(attempts) { RetryDownload(remote, attempts) },
-        give_up: fn() {
-          state.config.signal_status(remote.path, entry.SyncFailed)
-        },
-      )
-      actor.continue(state)
-    }
+  }
+}
+
+/// A changed-remote download is unsafe only if the destination blob no
+/// longer matches the last-synced bytes the decision assumed (Some(known)):
+/// a size/mtime drift is a local edit that must not be clobbered. A
+/// brand-new remote (None) carries no expectation to check — overwriting an
+/// existing same-path file is left to the next round's both-created
+/// handling, and guarding it here would wrongly skip an idempotent
+/// re-download of a file already written but not yet recorded.
+fn safe_to_overwrite(
+  config: TransferConfig,
+  path: String,
+  expected: option.Option(entry.KnownFile),
+) -> Bool {
+  case expected {
+    option.None -> True
+    option.Some(known) ->
+      case simplifile.file_info(config.root_dir <> "/" <> path) {
+        Error(_) -> True
+        Ok(info) ->
+          info.size == known.size
+          && info.mtime_seconds == known.local_mtime_seconds
+      }
   }
 }
 

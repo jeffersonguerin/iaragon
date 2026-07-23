@@ -379,12 +379,23 @@ por leitura antes de corrigir, cada fix com TDD. Corrigido:
   scan pula entrada com lstat falho (não crasha a rodada); reconciler sem
   modelo pede `Reseed` em gatilho local (não só em ApplyRemoteChanges).
 
+Fase hardening — recheck destrutivo (sessão 15, resolvido o residual):
+**delete e download re-verificam o arquivo antes de destruir**. Uma
+decisão feita no scan pode executar minutos depois (fila serial do pool);
+se o usuário editou nesse meio, apagar/sobrescrever perderia a edição sem
+virar conflito. Agora `EnqueueDeleteLocal(known)` e `EnqueueDownload(remote,
+expected)` carregam a metadata esperada; o pool compara size+mtime do
+arquivo em disco imediatamente antes: divergiu → pula (mantém o known), a
+rodada seguinte re-decide e o domínio produz o conflito certo
+(LocalEditRemoteDelete / EditEdit — edição sobrevive). Delete só rechecka
+BLOB (pasta = empty-check; link `.desktop` gerado = force). Download só
+rechecka quando `expected = Some` (remoto mudou); remoto novo (`None`) não
+rechecka (não quebra re-download idempotente). Sub-janela residual
+ESTREITA: edição DURANTE o stream de um download longo — o rename atômico
+acontece dentro do `download.gleam`; fechar exige um guard pré-rename lá
+(a maior janela, a de espera-na-fila, está fechada).
+
 Residuais rastreados (não perda-de-dados silenciosa; documentados):
-- **Recheck antes de delete/download destrutivo**: um arquivo editado ENTRE
-  a decisão e a execução (fila serial do pool) pode ser apagado/sobrescrito
-  sem virar conflito — o correto seria re-verificar size/mtime vs known
-  imediatamente antes da operação (exige passar a metadata esperada nos
-  comandos). Mitigado hoje: janela normalmente curta.
 - **infer_local_renames sem verificação de CONTEÚDO**: dois arquivos
   não-relacionados com size+mtime idênticos (raro) podem parear e renomear
   o remoto errado; a verificação exigiria hash (I/O) fora do domínio puro.

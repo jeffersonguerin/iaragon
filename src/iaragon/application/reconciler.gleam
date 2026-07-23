@@ -112,7 +112,10 @@ pub type Command {
 pub type ReconcilerConfig {
   ReconcilerConfig(
     state_owner: Subject(state_owner.Command),
-    dispatch_download: fn(RemoteFile) -> Nil,
+    /// Download a remote file: the second arg is the known the decision
+    /// assumed on disk (None for a brand-new remote), so the pool can avoid
+    /// clobbering a local edit that landed after the decision.
+    dispatch_download: fn(RemoteFile, Option(entry.KnownFile)) -> Nil,
     /// Delete a local mirror copy: the known is passed so the pool can
     /// re-verify the file before deleting (edit-after-decision protection).
     dispatch_delete_local: fn(entry.KnownFile) -> Nil,
@@ -353,7 +356,11 @@ fn run_round(state: State) -> State {
     case decision {
       decision.DownloadRemote(file_id, _path) -> {
         case dict.get(remote_by_id, file_id) {
-          Ok(remote) -> config.dispatch_download(remote)
+          Ok(remote) ->
+            config.dispatch_download(
+              remote,
+              option.from_result(dict.get(known_by_id, file_id)),
+            )
           Error(Nil) -> Nil
         }
         state
@@ -405,7 +412,9 @@ fn run_round(state: State) -> State {
                 // not user content: the pool force-deletes it (its kind is
                 // GoogleNative) and the fresh export lands at the new path.
                 config.dispatch_delete_local(known)
-                config.dispatch_download(remote)
+                // Fresh export lands at the NEW path, which has no local
+                // file yet — nothing to protect.
+                config.dispatch_download(remote, None)
               }
               _, _ ->
                 dispatch_plain_move(config, known_by_id, file_id, from, to)
