@@ -12,6 +12,7 @@
 //// Pure: stdlib only, like everything under domain/.
 
 import gleam/dict.{type Dict}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
@@ -87,14 +88,42 @@ fn assign_final_names(
   siblings
   |> list.sort(fn(a, b) { string.compare(a.file_id, b.file_id) })
   |> list.map_fold(set.new(), fn(taken: Set(String), node) {
-    let sanitized = sanitize_segment(node.name)
-    let final_name = case set.contains(taken, sanitized) {
-      False -> sanitized
-      True -> weave_id(sanitized, node.file_id)
-    }
+    let final_name = pick_free_name(node.name, node.file_id, taken)
     #(set.insert(taken, final_name), #(node, final_name))
   })
   |> fn(result) { result.1 }
+}
+
+/// Choose a name no earlier sibling has claimed. The sanitized name wins if
+/// free; otherwise the file_id is woven in; and if even THAT collides (a
+/// sibling can be crafted so its natural name equals another's woven form),
+/// numeric variants are appended until one is free — the same discipline as
+/// conflicted-copy naming. Without the final check two distinct fileIds could
+/// map to one path, silently dropping a file.
+fn pick_free_name(name: String, file_id: String, taken: Set(String)) -> String {
+  let sanitized = sanitize_segment(name)
+  case set.contains(taken, sanitized) {
+    False -> sanitized
+    True -> {
+      let woven = weave_id(sanitized, file_id)
+      case set.contains(taken, woven) {
+        False -> woven
+        True -> next_free_variant(woven, 2, taken)
+      }
+    }
+  }
+}
+
+fn next_free_variant(base: String, n: Int, taken: Set(String)) -> String {
+  let #(stem, extension) = split_extension(base)
+  let candidate = case extension {
+    "" -> stem <> " (" <> int.to_string(n) <> ")"
+    extension -> stem <> " (" <> int.to_string(n) <> ")." <> extension
+  }
+  case set.contains(taken, candidate) {
+    False -> candidate
+    True -> next_free_variant(base, n + 1, taken)
+  }
 }
 
 /// Turn one untrusted Drive name into one safe POSIX path segment. Names

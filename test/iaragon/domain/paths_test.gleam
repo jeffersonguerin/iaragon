@@ -86,6 +86,33 @@ pub fn duplicate_names_are_disambiguated_deterministically_test() {
   assert dict.get(resolved, "id-b") == Ok("report (id-b).txt")
 }
 
+// PENTEST — on a shared Drive a collaborator can read the fileIds the API
+// assigns, then craft a sibling whose NATURAL name equals the woven name
+// another twin will receive. If the woven fallback is not itself checked for
+// freedom, two distinct fileIds collapse onto one local path — a silent
+// overwrite / dropped file. Every fileId must map to a DISTINCT path.
+pub fn a_crafted_name_cannot_force_a_path_collision_test() {
+  // Sorted by file_id: id-a, id-b, id-c.
+  //  id-a "doc.txt"        -> "doc.txt"
+  //  id-b "doc (id-c).txt" -> free, taken
+  //  id-c "doc.txt"        -> taken -> weave -> "doc (id-c).txt" -> ALSO taken
+  let resolved =
+    paths.resolve_paths(
+      [
+        a_file("id-a", "doc.txt", "root"),
+        a_file("id-b", "doc (id-c).txt", "root"),
+        a_file("id-c", "doc.txt", "root"),
+      ],
+      root_id: "root",
+    )
+  let assert Ok(path_a) = dict.get(resolved, "id-a")
+  let assert Ok(path_b) = dict.get(resolved, "id-b")
+  let assert Ok(path_c) = dict.get(resolved, "id-c")
+  assert path_a != path_b
+  assert path_a != path_c
+  assert path_b != path_c
+}
+
 pub fn duplicate_folder_names_are_disambiguated_too_test() {
   let resolved =
     paths.resolve_paths(
