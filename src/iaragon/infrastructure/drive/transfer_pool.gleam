@@ -41,7 +41,11 @@ import simplifile
 
 pub type Command {
   EnqueueDownload(remote: RemoteFile)
-  EnqueueDeleteLocal(file_id: String, path: String)
+  /// Delete the mirror copy the reconciler decided is gone remotely. Carries
+  /// the expected known so the pool can re-verify a blob still matches it
+  /// right before deleting — a file edited between the decision and here is
+  /// left alone (the next round turns it into an edit-wins conflict).
+  EnqueueDeleteLocal(known: entry.KnownFile)
   EnqueueUpload(plan: UploadPlan)
   EnqueueTrashRemote(file_id: String)
   /// Resolve an edit-edit conflict: move the local version aside to
@@ -155,8 +159,8 @@ fn handle_command(
     EnqueueDownload(remote) -> run_download(state, remote, 0)
     RetryDownload(remote, failed_attempts) ->
       run_download(state, remote, failed_attempts)
-    EnqueueDeleteLocal(file_id, path) -> {
-      run_delete_local(state.config, file_id, path)
+    EnqueueDeleteLocal(known) -> {
+      run_delete_local(state.config, known)
       actor.continue(state)
     }
     EnqueueUpload(plan) -> run_upload(state, plan, 0)
@@ -181,38 +185,67 @@ fn handle_command(
 
 // --- Local deletions --------------------------------------------------------------
 
-/// `simplifile.delete` on a directory is recursive, and a directory that
-/// still has content may hold bytes that never synced: only an EMPTY
-/// directory is removed (and forgotten). A non-empty one is left untouched —
-/// its children carry their own delete decisions, and the next round
-/// re-decides this one once they are gone.
-fn run_delete_local(
-  config: TransferConfig,
-  file_id: String,
-  path: String,
-) -> Nil {
-  let target = config.root_dir <> "/" <> path
-  let removed = case simplifile.is_directory(target) {
-    Ok(True) ->
-      case simplifile.read_directory(target) {
-        Ok([]) -> {
-          let _ = simplifile.delete(target)
+/// Delete the local mirror copy, keyed on what kind of thing the known says
+/// it is:
+///
+/// - Folder: only an EMPTY directory is removed (`simplifile.delete` is
+///   recursive, and a non-empty dir may hold never-synced bytes); a
+///   non-empty one waits for its children's own deletions.
+/// - Blob: re-verify the file still matches the known's size+mtime right
+///   before deleting. A blob edited between the decision and now no longer
+///   matches — skip it and keep the known, so the next round re-decides and
+///   the domain turns it into a LocalEditRemoteDelete conflict (edit wins).
+/// - Google-native / shortcut: these are `.desktop` links WE generate, not
+///   user content, so delete unconditionally (this is also the
+///   policy-switch rematerialise path, which must drop the old link).
+///
+/// Either way delete_file (non-recursive) is used for the file branch, so
+/// kind drift can never turn one deletion into a recursive tree wipe.
+fn run_delete_local(config: TransferConfig, known: entry.KnownFile) -> Nil {
+  let target = config.root_dir <> "/" <> known.path
+  let removed = case known.kind {
+    Folder ->
+      case simplifile.is_directory(target) {
+        Ok(True) ->
+          case simplifile.read_directory(target) {
+            Ok([]) -> {
+              let _ = simplifile.delete(target)
+              True
+            }
+            _ -> False
+          }
+        // Already gone (or never a dir): nothing to remove, converge.
+        _ -> True
+      }
+    Blob ->
+      case blob_still_matches(target, known) {
+        True -> {
+          let _ = simplifile.delete_file(target)
           True
         }
-        _ -> False
+        False -> False
       }
-    _ -> {
-      // delete_file, not delete: the latter is recursive, so if this path
-      // is somehow a directory now (kind drift / TOCTOU), a whole tree of
-      // never-synced bytes would be lost. A non-directory delete_file
-      // fails harmlessly instead.
+    GoogleNative | Shortcut(_) -> {
       let _ = simplifile.delete_file(target)
       True
     }
   }
   case removed {
-    True -> process.send(config.state_owner, state_owner.ForgetKnown(file_id))
+    True ->
+      process.send(config.state_owner, state_owner.ForgetKnown(known.file_id))
     False -> Nil
+  }
+}
+
+/// A blob is safe to delete only if it still looks like the last-synced
+/// state. An absent file is a harmless no-op (converge); a present file
+/// whose size or mtime drifted was edited after the decision — protect it.
+fn blob_still_matches(target: String, known: entry.KnownFile) -> Bool {
+  case simplifile.file_info(target) {
+    Ok(info) ->
+      info.size == known.size
+      && info.mtime_seconds == known.local_mtime_seconds
+    Error(_) -> True
   }
 }
 

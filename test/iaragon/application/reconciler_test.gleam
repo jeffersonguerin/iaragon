@@ -75,8 +75,11 @@ fn start_reconciler_with_interval(
         dispatch_download: fn(remote) {
           process.send(dispatches, DownloadDispatched(remote))
         },
-        dispatch_delete_local: fn(file_id, path) {
-          process.send(dispatches, DeleteLocalDispatched(file_id, path))
+        dispatch_delete_local: fn(known: entry.KnownFile) {
+          process.send(
+            dispatches,
+            DeleteLocalDispatched(known.file_id, known.path),
+          )
         },
         dispatch_upload: fn(plan) {
           process.send(dispatches, UploadDispatched(plan))

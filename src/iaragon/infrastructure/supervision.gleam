@@ -154,10 +154,10 @@ pub fn start_daemon(
           transfer_pool.EnqueueDownload(remote),
         )
       },
-      dispatch_delete_local: fn(file_id, path) {
+      dispatch_delete_local: fn(known) {
         process.send(
           transfer_pool_subject,
-          transfer_pool.EnqueueDeleteLocal(file_id, path),
+          transfer_pool.EnqueueDeleteLocal(known),
         )
       },
       dispatch_upload: fn(plan) {

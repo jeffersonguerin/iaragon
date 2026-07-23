@@ -113,7 +113,9 @@ pub type ReconcilerConfig {
   ReconcilerConfig(
     state_owner: Subject(state_owner.Command),
     dispatch_download: fn(RemoteFile) -> Nil,
-    dispatch_delete_local: fn(String, String) -> Nil,
+    /// Delete a local mirror copy: the known is passed so the pool can
+    /// re-verify the file before deleting (edit-after-decision protection).
+    dispatch_delete_local: fn(entry.KnownFile) -> Nil,
     dispatch_upload: fn(UploadPlan) -> Nil,
     dispatch_trash_remote: fn(String) -> Nil,
     /// Edit-edit resolution: (remote version, conflicted-copy path).
@@ -358,7 +360,7 @@ fn run_round(state: State) -> State {
       }
       decision.DeleteLocal(path) -> {
         case dict.get(known_by_path, path) {
-          Ok(file) -> config.dispatch_delete_local(file.file_id, path)
+          Ok(file) -> config.dispatch_delete_local(file)
           Error(Nil) -> Nil
         }
         state
@@ -396,10 +398,13 @@ fn run_round(state: State) -> State {
           // would leave stale bytes behind the new extension. Drop the old
           // file and materialise fresh; the download's PutKnown fixes the
           // index.
-          Ok(_known), Ok(remote) ->
+          Ok(known), Ok(remote) ->
             case remote.kind, changed_extension(from, to) {
               GoogleNative, True -> {
-                config.dispatch_delete_local(file_id, from)
+                // The old materialisation is a .desktop link we generated,
+                // not user content: the pool force-deletes it (its kind is
+                // GoogleNative) and the fresh export lands at the new path.
+                config.dispatch_delete_local(known)
                 config.dispatch_download(remote)
               }
               _, _ ->

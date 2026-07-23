@@ -271,10 +271,44 @@ pub fn deleting_locally_removes_the_file_and_forgets_it_test() {
   process.send(pool, transfer_pool.EnqueueDownload(remote))
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") != None })
 
-  process.send(pool, transfer_pool.EnqueueDeleteLocal("id-1", "old.txt"))
+  // The reconciler passes the known it looked up; its metadata matches the
+  // file just downloaded, so the delete proceeds.
+  let assert Some(known) = known_of(owner, "id-1")
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(known))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-1") == None })
   assert simplifile.is_file(root <> "/old.txt") == Ok(False)
+}
+
+pub fn a_delete_is_skipped_when_the_file_was_edited_since_the_decision_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let root = scratch_dir <> "/delete-edited"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/doc.txt", contents: "edited since decision")
+  let pool =
+    start_pool_with(
+      a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
+    )
+  // The known reflects the PRE-edit state (size 5, mtime 1000); the file on
+  // disk was changed after the delete decision, so it no longer matches.
+  let stale_known =
+    entry.KnownFile(
+      ..a_known_at("id-1", "doc.txt"),
+      size: 5,
+      local_mtime_seconds: 1000,
+    )
+  process.send(owner, state_owner.PutKnown(stale_known))
+
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(stale_known))
+
+  // The edit must survive and the known must NOT be forgotten: the next
+  // round re-decides and the domain turns it into a LocalEditRemoteDelete
+  // conflict (the edit wins).
+  process.sleep(150)
+  assert simplifile.read(root <> "/doc.txt") == Ok("edited since decision")
+  assert known_of(owner, "id-1") != None
 }
 
 pub fn a_download_signals_syncing_then_synced_test() {
@@ -396,14 +430,11 @@ pub fn deleting_an_empty_directory_removes_and_forgets_it_test() {
     start_pool_with(
       a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
     )
-  process.send(
-    owner,
-    state_owner.PutKnown(
-      entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder),
-    ),
-  )
+  let folder =
+    entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder)
+  process.send(owner, state_owner.PutKnown(folder))
 
-  process.send(pool, transfer_pool.EnqueueDeleteLocal("id-f", "old-dir"))
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(folder))
 
   assert fakes.retry_until(40, fn() { known_of(owner, "id-f") == None })
   assert simplifile.is_directory(root <> "/old-dir") == Ok(False)
@@ -420,14 +451,11 @@ pub fn a_directory_with_content_is_left_alone_test() {
     start_pool_with(
       a_pool_config(root, owner, fn(_id, _dest) { Error("unused") }),
     )
-  process.send(
-    owner,
-    state_owner.PutKnown(
-      entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder),
-    ),
-  )
+  let folder =
+    entry.KnownFile(..a_known_at("id-f", "old-dir"), md5: None, kind: Folder)
+  process.send(owner, state_owner.PutKnown(folder))
 
-  process.send(pool, transfer_pool.EnqueueDeleteLocal("id-f", "old-dir"))
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(folder))
 
   // Deleting a directory that still has content would be data loss: the
   // pool must leave both the bytes and the bookkeeping untouched, so the
