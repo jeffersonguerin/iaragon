@@ -5,6 +5,7 @@ version = "1.0.0"
 target = "erlang"
 description = "Bidirectional Google Drive sync daemon for Linux, on the BEAM"
 licences = ["Apache-2.0"]
+repository = { type = "github", user = "jeffersonguerin", repo = "iaragon" }
 # stdlib APIs used here (e.g. bit_array base64) need this compiler line and
 # Erlang/OTP >= 26 at runtime.
 gleam = ">= 1.17.0"
