@@ -1,0 +1,4 @@
+{
+  "name": "bash-lsp",
+  "description": "bash-language-server for the POSIX sh surfaces (install.sh, scripts/, .githooks/): ShellCheck-backed diagnostics and hover. Needs bash-language-server on PATH (npm install -g bash-language-server); install shellcheck too for the diagnostics to appear."
+}

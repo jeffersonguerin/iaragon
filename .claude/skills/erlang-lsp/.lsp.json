@@ -1,0 +1,10 @@
+{
+  "erlang": {
+    "command": "elp",
+    "args": ["server"],
+    "extensionToLanguage": {
+      ".erl": "erlang",
+      ".hrl": "erlang"
+    }
+  }
+}

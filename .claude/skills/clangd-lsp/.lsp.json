@@ -1,0 +1,10 @@
+{
+  "cpp": {
+    "command": "clangd",
+    "args": [],
+    "extensionToLanguage": {
+      ".cpp": "cpp",
+      ".h": "cpp"
+    }
+  }
+}

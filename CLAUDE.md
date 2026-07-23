@@ -826,4 +826,17 @@ run; asserts são canários generosos (propriedades, não micro-tempos).
   `.claude/skills/` do repo carrega automático (trust gate) na PRÓXIMA
   sessão. Não usar `restartOnCrash`/`shutdownTimeout` (exigem CC ≥
   2.1.205; em versões anteriores a presença deles faz o servidor ser
-  PULADO). Sem LSP para os `.erl` (erlang_ls não instalado; FFI é fino).
+  PULADO).
+- **LSPs das demais linguagens do repo (sessão 21)**: mesmo padrão de
+  plugin, um por servidor — `.claude/skills/erlang-lsp/` (ELP,
+  `elp server`, p/ os FFIs `.erl`/`.hrl`; binário estático nos releases
+  do WhatsApp/erlang-language-platform — o GitHub é 403 atrás do proxy
+  destes containers, instalar na máquina local), `clangd-lsp/` (plugin
+  Dolphin C++; `apt install clangd`; `compile_commands.json` via
+  `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` p/ resolução completa de
+  includes) e `bash-lsp/` (`npm i -g bash-language-server` +
+  `shellcheck` p/ diagnostics; cobre `.sh` — os hooks sem extensão ficam
+  de fora do mapeamento). Binário ausente = servidor pulado em silêncio,
+  então as configs são inofensivas onde a ferramenta não existe. clangd
+  e bash-language-server validados com um `initialize` LSP real neste
+  container. Ruby (1 arquivo, a Formula) deliberadamente sem LSP.

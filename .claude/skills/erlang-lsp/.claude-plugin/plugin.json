@@ -1,0 +1,4 @@
+{
+  "name": "erlang-lsp",
+  "description": "Erlang language server (ELP, `elp server`) for the FFI modules (src/*.erl, test/*.erl): diagnostics, go-to-definition, hover. Needs the elp binary on PATH — static builds at https://github.com/WhatsApp/erlang-language-platform/releases (pick the asset matching your OTP major). Without the binary the server is skipped silently."
+}

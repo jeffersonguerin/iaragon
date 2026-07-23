@@ -1,0 +1,4 @@
+{
+  "name": "clangd-lsp",
+  "description": "clangd for the Dolphin overlay plugin (integrations/dolphin, C++/Qt/KF5): diagnostics, go-to-definition, hover. Needs clangd on PATH (apt install clangd). For full include resolution generate compile_commands.json once: cmake -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON inside integrations/dolphin."
+}
