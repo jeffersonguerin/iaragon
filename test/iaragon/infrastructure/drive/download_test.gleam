@@ -10,6 +10,12 @@ import simplifile
 @external(erlang, "iaragon_serve_once_ffi", "serve_once")
 fn serve_once(status: Int, body: String) -> Int
 
+@external(erlang, "iaragon_serve_once_ffi", "serve_redirect")
+fn serve_redirect(location: String) -> Int
+
+@external(erlang, "iaragon_serve_once_ffi", "serve_auth_reporting")
+fn serve_auth_reporting() -> Int
+
 const scratch_dir = "build/test-scratch/download"
 
 fn a_local_url(port: Int) -> String {
@@ -64,6 +70,49 @@ pub fn redownloading_replaces_the_previous_content_test() {
       timeout_ms: 5000,
     )
   assert simplifile.read(destination) == Ok("second")
+}
+
+// Sanity check for the redirect pentest below: the auth-reporting server
+// really does detect the header — a DIRECT download (no redirect) carries the
+// bearer, so the body must be "leaked-auth". Without this, "no-auth" in the
+// redirect test could be a false negative from broken header detection.
+pub fn the_direct_request_carries_the_bearer_test() {
+  let port = serve_auth_reporting()
+  let destination = scratch_dir <> "/direct-auth/report.txt"
+  let assert Ok(Nil) =
+    download.fetch_file_to_disk(
+      url: "http://127.0.0.1:" <> int.to_string(port) <> "/files/id-1?alt=media",
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+  assert simplifile.read(destination) == Ok("leaked-auth")
+}
+
+// PENTEST — a download carries the Bearer token in its Authorization header.
+// If a redirect were followed with that header, the credential would travel
+// to the redirect target. The FFI must follow redirects WITHOUT forwarding
+// the Authorization header (a Drive alt=media 302 goes to a signed URL that
+// needs no bearer), so the token never leaves the initial Google host.
+pub fn a_redirect_is_followed_without_forwarding_the_bearer_test() {
+  let target_port = serve_auth_reporting()
+  let target_url =
+    "http://127.0.0.1:" <> int.to_string(target_port) <> "/signed-download"
+  let redirect_port = serve_redirect(target_url)
+  let destination = scratch_dir <> "/redirect/report.txt"
+
+  let assert Ok(Nil) =
+    download.fetch_file_to_disk(
+      url: "http://127.0.0.1:"
+        <> int.to_string(redirect_port)
+        <> "/files/id-1?alt=media",
+      access_token: "at-1",
+      destination: destination,
+      timeout_ms: 5000,
+    )
+  // The redirected request reached the target without the Authorization
+  // header (had it forwarded the bearer, the body would be "leaked-auth").
+  assert simplifile.read(destination) == Ok("no-auth")
 }
 
 pub fn a_refusal_reports_the_status_and_writes_nothing_test() {
