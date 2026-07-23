@@ -28,6 +28,43 @@ pub fn nested_files_get_slash_joined_paths_test() {
   assert dict.get(resolved, "id-1") == Ok("docs/report.txt")
 }
 
+// Names come from the Drive API and are untrusted: "..", ".", empty, and
+// names carrying "/" must never resolve to a path segment that escapes the
+// mirror root when the pool joins root_dir <> "/" <> path.
+pub fn dot_dot_names_cannot_escape_the_mirror_test() {
+  let resolved =
+    paths.resolve_paths(
+      [
+        a_folder("id-esc", "..", "root"),
+        a_file("id-1", "payload", "id-esc"),
+      ],
+      root_id: "root",
+    )
+  let assert Ok(folder_path) = dict.get(resolved, "id-esc")
+  assert folder_path == "_.."
+  assert dict.get(resolved, "id-1") == Ok("_../payload")
+}
+
+pub fn single_dot_and_empty_names_are_neutralised_test() {
+  let resolved =
+    paths.resolve_paths(
+      [a_file("id-dot", ".", "root"), a_file("id-empty", "", "root")],
+      root_id: "root",
+    )
+  assert dict.get(resolved, "id-dot") == Ok("_.")
+  assert dict.get(resolved, "id-empty") == Ok("_")
+}
+
+pub fn slash_in_name_cannot_introduce_a_path_segment_test() {
+  let resolved =
+    paths.resolve_paths(
+      [a_file("id-1", "../etc/passwd", "root")],
+      root_id: "root",
+    )
+  // "/" becomes "_", so no new segment and no traversal.
+  assert dict.get(resolved, "id-1") == Ok(".._etc_passwd")
+}
+
 pub fn files_in_the_root_keep_bare_names_test() {
   let resolved =
     paths.resolve_paths([a_file("id-1", "a.txt", "root")], root_id: "root")

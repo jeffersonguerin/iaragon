@@ -2,7 +2,8 @@
 //// mapping is lossy by nature — names are not unique within a folder and may
 //// contain "/" — so the rules here are what keep it deterministic:
 ////
-//// - names are sanitized ("/" becomes "_");
+//// - names are sanitized: "/" becomes "_", and the traversal payloads "",
+////   ".", ".." are neutralised (they come from the API and are untrusted);
 //// - among same-named siblings the lowest file_id keeps the natural name and
 ////   every other twin gets its id woven in before the extension;
 //// - only nodes reachable from the mirror root are mapped (restrictToMyDrive
@@ -86,7 +87,7 @@ fn assign_final_names(
   siblings
   |> list.sort(fn(a, b) { string.compare(a.file_id, b.file_id) })
   |> list.map_fold(set.new(), fn(taken: Set(String), node) {
-    let sanitized = string.replace(node.name, "/", "_")
+    let sanitized = sanitize_segment(node.name)
     let final_name = case set.contains(taken, sanitized) {
       False -> sanitized
       True -> weave_id(sanitized, node.file_id)
@@ -94,6 +95,21 @@ fn assign_final_names(
     #(set.insert(taken, final_name), #(node, final_name))
   })
   |> fn(result) { result.1 }
+}
+
+/// Turn one untrusted Drive name into one safe POSIX path segment. Names
+/// come from the API and are attacker-influenceable: "/" would introduce a
+/// new segment, and "", ".", ".." are the classic traversal payloads (a
+/// folder literally named ".." would make the mirror climb out of its root
+/// when joined as root_dir <> "/" <> path). "/" becomes "_"; the three
+/// dangerous segments are neutralised with a leading "_" so they stay
+/// single, inert names.
+fn sanitize_segment(name: String) -> String {
+  let replaced = string.replace(name, "/", "_")
+  case replaced {
+    "" | "." | ".." -> "_" <> replaced
+    other -> other
+  }
 }
 
 fn weave_id(name: String, file_id: String) -> String {
