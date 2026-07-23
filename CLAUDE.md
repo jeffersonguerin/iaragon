@@ -516,16 +516,25 @@ pentest TDD:
 - **sanitize_segment sem controle (LOW)**: NUL/control chars passavam p/ o
   segmento → op de arquivo trunca/erra. Substituídos por `_` (< 0x20 e 0x7f).
 
-Residuais rastreados desta rodada (documentados, não perda-de-dados):
-- **`descend` não é tail-recursivo (P3, LOW-MED)**: profundidade de
-  aninhamento controlada pelo atacante cresce o stack do processo; BEAM
-  cresce stack dinamicamente (10k níveis sobrevive), mas centenas de milhares
-  viram DoS de memória/latência no reconciler. Fix = travessia por worklist
-  explícito — refactor da resolução correção-crítica, para sessão dedicada.
-- **Upload de arquivo 0-byte falha (U3, LOW)**: `send_chunks` vê EndOfFile no
-  byte 0 e erra; 0-byte nunca sobe. Correção exige o protocolo resumable de
-  0-byte (`Content-Range: bytes */0`) — verificar na doc oficial antes
-  (regra: não inventar API). Não é segurança.
+Residuais desta rodada, RESOLVIDOS (fecham a sessão 2 de pentests):
+- **`descend` → worklist explícito (P3)**: a resolução de paths era recursiva
+  (uma frame por nível de aninhamento) — sobrevivia a centenas de milhares de
+  níveis no BEAM, mas era DoS de memória/latência em profundidade patológica.
+  Reescrita como `walk` tail-recursivo sobre um worklist na heap → stack
+  CONSTANTE, profundidade-independente. Semântica idêntica (guard de visitados
+  termina ciclos; desambiguação por pasta é ordem-independente, logo o dict
+  resultante é o mesmo) — os testes de paths fixam isso; teste novo resolve
+  cadeia de 200k níveis.
+- **Upload de 0-byte (U3)**: arquivo vazio não tem chunk → `send_chunks` erra
+  em EndOfFile no byte 0 (nunca subia). Agora finaliza a sessão com corpo
+  vazio e `Content-Range: bytes */0` (a forma documentada `bytes */TOTAL` com
+  TOTAL=0, como as client libs do Google fazem). Guard preciso
+  (`total_size == 0 && offset == 0`) — short read em arquivo não-vazio segue
+  erro. RESÍDUO honesto: não verificado e2e contra um upload 0-byte real do
+  Drive (doc do Drive não detalha o caso; segue a forma documentada + convenção
+  das libs).
+
+**Backlog de residuais zerado** (2 rodadas de pentest encerradas).
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
