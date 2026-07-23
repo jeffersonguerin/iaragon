@@ -604,15 +604,22 @@ SQLite por fileId, nativo-como-link). Corrigido a partir da revisão:
   (multipart) exigiria um path de upload novo só p/ um caso raro; `*/0` segue
   a forma documentada `bytes */TOTAL`. Decisão registrada, não é invenção.
 
-**NÃO implementado — edit-back de nativos (bloqueado por segurança de API)**:
-a ideia (estilo Insync: editar o `.docx` exportado re-sincroniza p/ o Drive)
-NÃO é implementável com segurança pela API v3 documentada. `files.update`
-com media num Google Doc **substitui/converte** o conteúdo (a conversão é
-recurso só de `files.create`), arriscando transformar o Doc nativo do
-usuário num blob — perda do status nativo (comentários/colaboração). Viola
-"não inventar API" + "zero perda silenciosa". Decisão de produto pendente
-sobre a alternativa SEGURA (ex.: edição de nativo exportado vira cópia
-conflitada subida como blob novo, sem tocar o Doc).
+Edit-back de nativos — resolvido pela via SEGURA (sessão 19): atualizar o
+Google Doc a partir do `.docx` editado é INSEGURO na API v3 (`files.update`
+com media substitui/converte o conteúdo; conversão é só de `files.create`)
+→ arriscaria virar o Doc num blob. Então NÃO fazemos isso. Em vez disso,
+**edição local de um nativo exportado vira cópia conflitada** (decisão do
+usuário, estilo Dropbox): `reconcile` reporta `Conflict(NativeLocalEdit)`
+(o nativo NUNCA sobe — só reporta a condição); o `reconciler` resolve por
+política — sob export (`ExportOffice`/`ExportOdf`) reusa a máquina de
+conflito existente (a cópia move-se p/ nome datado e sobe como `.docx` blob
+NOVO, sem conversão, o Doc intacto; `run_conflict_copy` re-exporta o nativo
+no path original); sob `LinkFile` o arquivo é um link `.desktop` gerado,
+então só re-escreve. `record_known` faz `file_info` no `.docx` re-exportado
+→ o nativo assenta na rodada seguinte sem loop de conflito. Detecção por
+size+mtime (nativo não tem md5); um `touch` puro sem edição de conteúdo
+pode gerar uma cópia conflitada espúria (inócua). Não implementável de
+outra forma sem violar "não inventar API"/"zero perda silenciosa".
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
