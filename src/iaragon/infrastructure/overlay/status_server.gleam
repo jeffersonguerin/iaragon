@@ -12,6 +12,7 @@ import gleam/erlang/process.{type Pid, type Subject}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
+import gleam/string
 
 @external(erlang, "iaragon_status_ffi", "serve_status_lines")
 fn serve_status_lines(
@@ -29,8 +30,18 @@ pub fn resolve_socket_path(
   data_dir: String,
 ) -> String {
   case runtime_dir {
-    Ok("") | Error(Nil) -> data_dir <> "/status.sock"
-    Ok(dir) -> dir <> "/iaragon.sock"
+    Ok("") | Error(Nil) -> join(data_dir, "status.sock")
+    Ok(dir) -> join(dir, "iaragon.sock")
+  }
+}
+
+/// Join a directory and a leaf with exactly one separator — a trailing
+/// slash on the directory (some sessions export XDG_RUNTIME_DIR with one)
+/// must not become "//" in the path we report.
+fn join(dir: String, leaf: String) -> String {
+  case string.ends_with(dir, "/") {
+    True -> dir <> leaf
+    False -> dir <> "/" <> leaf
   }
 }
 

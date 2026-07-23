@@ -98,3 +98,16 @@ pub fn an_empty_runtime_dir_counts_as_absent_test() {
   assert status_server.resolve_socket_path(Ok(""), "/data")
     == "/data/status.sock"
 }
+
+// A runtime dir with a trailing slash (some sessions set
+// XDG_RUNTIME_DIR=/run/user/1000/) must not produce a "//" in the joined
+// path — cosmetic, POSIX collapses it, but the reported path must be clean.
+pub fn a_trailing_slash_on_the_runtime_dir_is_not_doubled_test() {
+  assert status_server.resolve_socket_path(Ok("/run/user/1000/"), "/data")
+    == "/run/user/1000/iaragon.sock"
+}
+
+pub fn a_trailing_slash_on_the_data_dir_is_not_doubled_test() {
+  assert status_server.resolve_socket_path(Error(Nil), "/data/")
+    == "/data/status.sock"
+}
