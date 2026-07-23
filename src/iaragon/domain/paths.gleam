@@ -134,11 +134,27 @@ fn next_free_variant(base: String, n: Int, taken: Set(String)) -> String {
 /// dangerous segments are neutralised with a leading "_" so they stay
 /// single, inert names.
 fn sanitize_segment(name: String) -> String {
-  let replaced = string.replace(name, "/", "_")
+  let replaced = name |> string.replace("/", "_") |> strip_control_characters
   case replaced {
     "" | "." | ".." -> "_" <> replaced
     other -> other
   }
+}
+
+/// Replace ASCII control characters (including NUL and tab/newline) with "_".
+/// A NUL would truncate the name at the filesystem boundary; the others make
+/// unusable segments. Printable characters (including all of Unicode ≥ 0x20,
+/// bar 0x7f DEL) pass through unchanged.
+fn strip_control_characters(name: String) -> String {
+  name
+  |> string.to_utf_codepoints
+  |> list.map(fn(codepoint) {
+    case string.utf_codepoint_to_int(codepoint) {
+      value if value < 0x20 || value == 0x7f -> "_"
+      _ -> string.from_utf_codepoints([codepoint])
+    }
+  })
+  |> string.concat
 }
 
 fn weave_id(name: String, file_id: String) -> String {

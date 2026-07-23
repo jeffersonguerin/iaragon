@@ -113,6 +113,18 @@ pub fn a_crafted_name_cannot_force_a_path_collision_test() {
   assert path_b != path_c
 }
 
+// PENTEST — a Drive name carrying a NUL or other control character would,
+// unsanitized, reach the filesystem op and error/truncate at the NUL. Every
+// control character must be neutralised into an inert segment.
+pub fn control_characters_in_a_name_are_neutralised_test() {
+  let resolved =
+    paths.resolve_paths(
+      [a_file("id-1", "a\u{0}b\u{1f}c\td.txt", "root")],
+      root_id: "root",
+    )
+  assert dict.get(resolved, "id-1") == Ok("a_b_c_d.txt")
+}
+
 pub fn duplicate_folder_names_are_disambiguated_too_test() {
   let resolved =
     paths.resolve_paths(
