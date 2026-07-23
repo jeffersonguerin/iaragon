@@ -201,8 +201,10 @@ gleam test
 Layout: `src/iaragon/domain` (pure logic — no I/O, no OTP),
 `src/iaragon/application` (use-case actors), `src/iaragon/infrastructure`
 (Drive/FS/persistence adapters and the supervision tree). Erlang FFI is
-kept thin, in `src/iaragon_*_ffi.erl`. See `CLAUDE.md` for the full
-decision log.
+kept thin, in `src/iaragon_*_ffi.erl`. The full decision log lives in
+[`docs/`](docs/) — architecture, verified Drive API facts, the security
+and development logs, performance measurements and the data-safety
+valves; `CLAUDE.md` keeps the working rules and a minimal map.
 
 ## Licence
 
