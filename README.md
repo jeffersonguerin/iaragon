@@ -62,7 +62,7 @@ curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install
 Overridable by environment: `IARAGON_REF` (git ref, default `main`),
 `IARAGON_PREFIX` (default `~/.local`), `IARAGON_PM` (force the package
 manager for missing deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`,
-`IARAGON_NO_SUDO=1`.
+`REBAR3_VERSION` (pin the rebar3 download), `IARAGON_NO_SUDO=1`.
 
 It installs the `iaragon` (daemon) and `iaragon-login` launchers to
 `~/.local/bin`, plus a systemd **user** unit at

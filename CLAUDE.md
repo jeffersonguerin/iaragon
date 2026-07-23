@@ -656,14 +656,22 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
   - Instala unit **systemd de usuário** (`~/.config/systemd/user/
     iaragon.service`, `Restart=on-failure`); o dir do `erl` é embutido no PATH
     dos launchers (funciona sob o PATH mínimo do systemd `--user`).
-  - Hardening do instalador (revisão de segurança/robustez desta sessão):
+  - Hardening do instalador (revisão de segurança/robustez por subagente
+    adversarial — sem CRITICAL; negativos confirmados: sem `eval`/injeção,
+    sudo com escopo só nos installs, traps limpas, truncamento seguro):
     toda a lógica imperativa vive em `main()` chamada na ÚLTIMA linha — um
     `curl | sh` truncado nunca executa script parcial; guard de `IARAGON_PREFIX`
-    (absoluto e ≠ `/`) antes do `rm -rf "$LIBDIR"`; downloads via
-    temp+`mv` (nada de artefato parcial); modelo de confiança documentado
-    (pacotes = assinatura do gerenciador; Gleam/rebar3 = HTTPS de release
-    oficial no GitHub, autenticidade de transporte por TLS, sem checksum
-    fixado — quem quiser mais instala Gleam/rebar3 à mão e eles são detectados).
+    (absoluto, ≠ `/`, charset `[A-Za-z0-9._/-]` — fecha injeção via heredoc nos
+    launchers/unit) antes do `rm -rf "$LIBDIR"`; downloads via temp+`mv` (sem
+    artefato parcial); modelo de confiança documentado (pacotes = assinatura do
+    gerenciador; Gleam/rebar3 = HTTPS de release oficial no GitHub, TLS, sem
+    checksum fixado — quem quiser mais instala à mão e eles são detectados).
+    Achados corrigidos: **Erlang presente-mas-antigo NÃO é sobrescrito** (não
+    duplica o toolchain do usuário — vai direto à orientação de upgrade);
+    **piso de versão do Gleam** (>= 1.17, mesmo gate do OTP — presente-mas-antigo
+    para com mensagem clara em vez de `gleam export` confuso); `REBAR3_VERSION`
+    opcional p/ pin reprodutível (default latest); `IARAGON_PM` validado contra
+    o conjunto conhecido; idiom frágil `A && B || C` do compilador C virou `if`.
 - **`Formula/iaragon.rb`** (Homebrew): fórmula **HEAD-only** (rolling release,
   sem tags → `brew install --HEAD`). Via Homebrew TODO o toolchain vem do
   Homebrew (`depends_on` gleam/rebar3 build + erlang runtime + `on_linux

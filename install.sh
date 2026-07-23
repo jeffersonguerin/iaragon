@@ -31,6 +31,8 @@
 #                   toolchain (apt|dnf|pacman|zypper|apk|brew). Default: the
 #                   first one detected. Present deps are kept regardless.
 #   GLEAM_VERSION   Gleam to fetch if your manager has no package (default: 1.17.0)
+#   REBAR3_VERSION  pin the rebar3 release to fetch if your manager has none
+#                   (default: unset -> latest)
 #   IARAGON_NO_SUDO set to 1 to never call sudo (fail instead if a dep is missing)
 #
 # Honest about its limits: the daemon needs Erlang/OTP >= 26 at RUNTIME. If
@@ -53,12 +55,18 @@ REF="${IARAGON_REF:-main}"
 PREFIX="${IARAGON_PREFIX:-$HOME/.local}"
 GLEAM_VERSION="${GLEAM_VERSION:-1.17.0}"
 
-# Guard the install prefix before it feeds an `rm -rf` below: it must be an
-# absolute path and never the filesystem root.
+# Guard the install prefix before it feeds an `rm -rf` and gets interpolated
+# (unquoted) into the generated launcher/unit files: it must be an absolute
+# path, never the filesystem root, and free of characters that could break or
+# inject into those files (whitespace, quotes, backslash, control chars).
 case "$PREFIX" in
   /)  echo "error: IARAGON_PREFIX must not be '/'" >&2; exit 1 ;;
   /*) : ;;
   *)  echo "error: IARAGON_PREFIX must be an absolute path (got '$PREFIX')" >&2; exit 1 ;;
+esac
+case "$PREFIX" in
+  *[!A-Za-z0-9._/-]*)
+    echo "error: IARAGON_PREFIX may only contain [A-Za-z0-9._/-] (got '$PREFIX')" >&2; exit 1 ;;
 esac
 
 LIBDIR="$PREFIX/lib/iaragon"
@@ -96,7 +104,13 @@ PM=""
 detect_pm() {
   # An explicit choice wins, so users can pin missing-dep installs to the same
   # manager their toolchain already uses.
-  if [ -n "${IARAGON_PM:-}" ]; then PM="$IARAGON_PM"; return; fi
+  if [ -n "${IARAGON_PM:-}" ]; then
+    case "$IARAGON_PM" in
+      apt|dnf|pacman|zypper|apk|brew) PM="$IARAGON_PM" ;;
+      *) die "IARAGON_PM must be one of apt|dnf|pacman|zypper|apk|brew (got '$IARAGON_PM')" ;;
+    esac
+    return
+  fi
   if   have apt-get; then PM="apt"
   elif have dnf;     then PM="dnf"
   elif have pacman;  then PM="pacman"
@@ -167,6 +181,18 @@ otp_ok() {
 }
 gleam_ok() { have gleam; }
 gleam_ver() { gleam --version 2>/dev/null | awk '{print $NF}'; }
+# The project needs Gleam >= 1.17 (see gleam.toml). An older Gleam would fail
+# `gleam export erlang-shipment` with a confusing error, so gate it like OTP.
+GLEAM_MIN_MAJOR=1
+GLEAM_MIN_MINOR=17
+gleam_new_enough() {
+  v="$(gleam_ver)"; [ -n "$v" ] || return 1
+  maj="${v%%.*}"; rest="${v#*.}"; min="${rest%%.*}"
+  case "$maj" in ''|*[!0-9]*) return 1 ;; esac
+  case "$min" in ''|*[!0-9]*) min=0 ;; esac
+  [ "$maj" -gt "$GLEAM_MIN_MAJOR" ] && return 0
+  [ "$maj" -eq "$GLEAM_MIN_MAJOR" ] && [ "$min" -ge "$GLEAM_MIN_MINOR" ]
+}
 cc_ok() { have cc || have gcc; }
 
 # --- ensure_* : install one dependency, method preserved -------------------
@@ -180,10 +206,17 @@ ensure_base() { # generic-dep  binary-to-check  human-name
 
 ensure_erlang() {
   otp_ok && { log "Erlang/OTP $(otp_release): present"; return 0; }
-  have erl && warn "Erlang/OTP $(otp_release) is older than the required 26 — replacing via $PM"
-  log "installing Erlang via $PM"
-  pkg_for erlang || true
-  otp_ok && { add_newly "erlang($PM)"; log "Erlang/OTP $(otp_release): installed via $PM"; return 0; }
+  if have erl; then
+    # Present but too old. Do NOT install a distro Erlang over the user's
+    # existing toolchain (kerl/asdf/manual): it would duplicate it and, on the
+    # distros that ship an old Erlang, still not reach 26. Send them to a real
+    # upgrade path instead.
+    warn "Erlang/OTP $(otp_release) is older than the required 26 — keeping your install untouched"
+  else
+    log "installing Erlang via $PM"
+    pkg_for erlang || true
+    otp_ok && { add_newly "erlang($PM)"; log "Erlang/OTP $(otp_release): installed via $PM"; return 0; }
+  fi
   cat >&2 <<EOF
 $(printf '%berror:%b' "$C_ERR" "$C_OFF") iaragon needs Erlang/OTP >= 26 at runtime, and $PM could not
 provide one$( { have erl && printf ' (found OTP %s)' "$(otp_release)"; } || true ).
@@ -199,13 +232,18 @@ EOF
 }
 
 ensure_gleam() {
-  gleam_ok && { log "Gleam $(gleam_ver): present"; return 0; }
+  if gleam_ok; then
+    gleam_new_enough && { log "Gleam $(gleam_ver): present"; return 0; }
+    die "Gleam $(gleam_ver) is older than the required ${GLEAM_MIN_MAJOR}.${GLEAM_MIN_MINOR}; upgrade it and re-run (your install is left untouched)"
+  fi
   # Method preserved: try the detected manager first.
   if [ "$PM" != "none" ]; then
     log "installing Gleam via $PM"
     pkg_for gleam || true
-    gleam_ok && { add_newly "gleam($PM)"; log "Gleam $(gleam_ver): installed via $PM"; return 0; }
-    note "$PM does not package Gleam — falling back to the official static binary (upstream's recommended install)"
+    if gleam_ok && gleam_new_enough; then
+      add_newly "gleam($PM)"; log "Gleam $(gleam_ver): installed via $PM"; return 0
+    fi
+    note "$PM has no suitable Gleam (>= ${GLEAM_MIN_MAJOR}.${GLEAM_MIN_MINOR}) — falling back to the official static binary (upstream's recommended install)"
   fi
   arch="$(uname -m)"
   case "$arch" in
@@ -238,7 +276,11 @@ ensure_rebar3() {
     have rebar3 && { add_newly "rebar3($PM)"; log "rebar3: installed via $PM"; return 0; }
     note "$PM does not package rebar3 — falling back to the official escript"
   fi
-  url="https://github.com/erlang/rebar3/releases/latest/download/rebar3"
+  if [ -n "${REBAR3_VERSION:-}" ]; then
+    url="https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3"
+  else
+    url="https://github.com/erlang/rebar3/releases/latest/download/rebar3"
+  fi
   log "fetching rebar3 (escript)"
   printf '%b    $ curl -fsSL %s%b\n' "$C_DIM" "$url" "$C_OFF"
   mkdir -p "$BINDIR"
@@ -321,7 +363,17 @@ log "resolving dependencies"
 ensure_base git  git  "git"
 ensure_base curl curl "curl"
 # The C compiler is either cc or gcc; check both, install the manager's gcc.
-if cc_ok; then log "C compiler: present"; else pkg_for cc || true; cc_ok && add_newly "gcc($PM)" || die "a C compiler is required (sqlight's NIF); install gcc/clang and re-run"; fi
+if cc_ok; then
+  log "C compiler: present"
+else
+  log "installing a C compiler via $PM"
+  pkg_for cc || true
+  if cc_ok; then
+    add_newly "gcc($PM)"; log "C compiler: installed via $PM"
+  else
+    die "a C compiler is required (sqlight's NIF); install gcc/clang and re-run"
+  fi
+fi
 ensure_base make make "make"
 ensure_erlang
 ensure_gleam
