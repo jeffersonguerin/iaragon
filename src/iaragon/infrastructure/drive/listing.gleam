@@ -38,14 +38,33 @@ pub fn fetch_full_listing(
   send: SendRequest,
   access_token access_token: String,
 ) -> Result(List(ChangedFile), DriveError) {
-  fetch_remaining_files(send, access_token, None, [])
+  fetch_remaining_files(send, access_token, None, [], 0)
 }
+
+/// Bound the walk so a feed that keeps returning nextPageToken cannot loop
+/// forever; generous headroom over any real My Drive listing.
+const max_pages = 10_000
 
 fn fetch_remaining_files(
   send: SendRequest,
   access_token: String,
   page_token: option.Option(String),
   seen: List(ChangedFile),
+  pages: Int,
+) -> Result(List(ChangedFile), DriveError) {
+  case pages >= max_pages {
+    True -> Error(UnexpectedPayload("file listing exceeded the page limit"))
+    False ->
+      do_fetch_remaining_files(send, access_token, page_token, seen, pages)
+  }
+}
+
+fn do_fetch_remaining_files(
+  send: SendRequest,
+  access_token: String,
+  page_token: option.Option(String),
+  seen: List(ChangedFile),
+  pages: Int,
 ) -> Result(List(ChangedFile), DriveError) {
   let query = [
     #("q", "trashed = false"),
@@ -69,10 +88,13 @@ fn fetch_remaining_files(
     |> result.replace_error(UnexpectedPayload(body)),
   )
   let #(files, next) = page
-  let seen = list.append(seen, files)
+  // Prepend then reverse once at the end: O(n), not the O(n²) of appending
+  // onto the growing accumulator page after page.
+  let seen = list.fold(files, seen, fn(acc, file) { [file, ..acc] })
   case next {
-    Some(token) -> fetch_remaining_files(send, access_token, Some(token), seen)
-    None -> Ok(seen)
+    Some(token) ->
+      fetch_remaining_files(send, access_token, Some(token), seen, pages + 1)
+    None -> Ok(list.reverse(seen))
   }
 }
 

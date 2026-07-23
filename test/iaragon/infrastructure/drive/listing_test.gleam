@@ -81,6 +81,20 @@ pub fn listing_walks_every_page_test() {
   assert string.contains(fields, "shortcutDetails(targetId)")
 }
 
+// PENTEST — a listing that always returns a nextPageToken must be bounded
+// rather than looping / growing memory forever.
+pub fn a_never_ending_listing_is_bounded_test() {
+  let send = fn(_sent: request.Request(String)) {
+    Ok(response.Response(
+      status: 200,
+      headers: [],
+      body: a_files_page("id-x", ",\"nextPageToken\":\"more\""),
+    ))
+  }
+  let assert Error(changes.UnexpectedPayload(_)) =
+    listing.fetch_full_listing(send, access_token: "at-1")
+}
+
 pub fn a_refused_listing_reports_status_test() {
   let inbox = process.new_subject()
   let send = respond_with(inbox, 403, "quota")

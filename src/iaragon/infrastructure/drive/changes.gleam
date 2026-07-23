@@ -110,20 +110,35 @@ pub fn fetch_all_changes(
   access_token access_token: String,
   page_token page_token: String,
 ) -> Result(#(List(Change), String), DriveError) {
-  fetch_remaining_changes(send, access_token, page_token, [])
+  fetch_remaining_changes(send, access_token, page_token, [], 0)
 }
+
+/// A hostile/buggy feed that keeps returning nextPageToken (never a
+/// newStartPageToken) would otherwise loop forever; the bound turns that into
+/// a clean error the poller retries. Generous — real delta feeds are small.
+const max_pages = 10_000
 
 fn fetch_remaining_changes(
   send: SendRequest,
   access_token: String,
   page_token: String,
   seen: List(Change),
+  pages: Int,
 ) -> Result(#(List(Change), String), DriveError) {
-  use page <- result.try(fetch_changes_page(send, access_token, page_token))
-  let seen = list.append(seen, page.changes)
-  case page.outcome {
-    NextPage(next) -> fetch_remaining_changes(send, access_token, next, seen)
-    Done(fresh) -> Ok(#(seen, fresh))
+  case pages >= max_pages {
+    True -> Error(UnexpectedPayload("change feed exceeded the page limit"))
+    False -> {
+      use page <- result.try(fetch_changes_page(send, access_token, page_token))
+      // Prepend then reverse once at the end: O(n) total, versus the O(n²) a
+      // list.append onto the growing accumulator would cost on a large feed.
+      let seen =
+        list.fold(page.changes, seen, fn(acc, change) { [change, ..acc] })
+      case page.outcome {
+        NextPage(next) ->
+          fetch_remaining_changes(send, access_token, next, seen, pages + 1)
+        Done(fresh) -> Ok(#(list.reverse(seen), fresh))
+      }
+    }
   }
 }
 

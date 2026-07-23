@@ -186,6 +186,21 @@ pub fn walking_accumulates_changes_across_pages_until_done_test() {
     == Ok(#([Removed("id-1"), Removed("id-2")], "fresh-9"))
 }
 
+// PENTEST — a feed that keeps handing back a nextPageToken (never a
+// newStartPageToken) must not loop forever / grow memory without bound; the
+// page cap turns it into a clean error the poller retries.
+pub fn a_never_ending_change_feed_is_bounded_test() {
+  let send = fn(_sent: request.Request(String)) {
+    Ok(response.Response(
+      status: 200,
+      headers: [],
+      body: a_removal_page("id-x", "\"nextPageToken\":\"more\"}"),
+    ))
+  }
+  let assert Error(changes.UnexpectedPayload(_)) =
+    changes.fetch_all_changes(send, access_token: "at-1", page_token: "tok-1")
+}
+
 pub fn walking_stops_at_the_first_refusal_test() {
   let send = fn(_sent) {
     Ok(response.Response(status: 429, headers: [], body: "slow down"))
