@@ -18,6 +18,9 @@ import iaragon/domain/entry.{type KnownFile}
 pub type Command {
   PutKnown(file: KnownFile)
   GetKnown(file_id: String, reply: Subject(Option(KnownFile)))
+  /// Lookup by mirror path (linear over the cache — the index key is
+  /// file_id; personal-Drive sizes keep this cheap).
+  FindKnownByPath(path: String, reply: Subject(Option(KnownFile)))
   ListKnown(reply: Subject(List(KnownFile)))
   ForgetKnown(file_id: String)
   SetPageToken(token: String)
@@ -87,6 +90,14 @@ fn handle_command(
         reply,
         option.from_result(dict.get(state.known_by_id, file_id)),
       )
+      actor.continue(state)
+    }
+    FindKnownByPath(path, reply) -> {
+      let found =
+        dict.values(state.known_by_id)
+        |> list.find(fn(file) { file.path == path })
+        |> option.from_result
+      process.send(reply, found)
       actor.continue(state)
     }
     ListKnown(reply) -> {

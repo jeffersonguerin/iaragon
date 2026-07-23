@@ -4,6 +4,7 @@
 
 import gleam/erlang/process.{type Subject}
 import gleam/int
+import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor
 import gleam/result
@@ -12,6 +13,7 @@ import gleam/time/calendar
 import gleam/time/timestamp
 import iaragon/application/reconciler
 import iaragon/application/state_owner
+import iaragon/application/status_board
 import iaragon/domain/entry
 import iaragon/infrastructure/drive/backoff
 import iaragon/infrastructure/drive/remote_poller
@@ -19,6 +21,7 @@ import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/fs/hashing
 import iaragon/infrastructure/fs/local_scan
 import iaragon/infrastructure/fs/local_watcher
+import iaragon/infrastructure/overlay/status_server
 
 pub type Daemon {
   Daemon(
@@ -28,6 +31,7 @@ pub type Daemon {
     remote_poller: Subject(remote_poller.Command),
     reconciler: Subject(reconciler.Command),
     transfer_pool: Subject(transfer_pool.Command),
+    status_board: Subject(status_board.Command),
   )
 }
 
@@ -38,6 +42,8 @@ const round_interval_ms = 30_000
 const watch_poll_interval_ms = 2000
 
 const watch_debounce_ms = 1500
+
+const status_call_timeout_ms = 500
 
 /// YYYY-MM-DD in UTC, for conflicted-copy names.
 fn build_date_stamp() -> String {
@@ -66,12 +72,15 @@ pub fn start_daemon(
   transfers transfers: transfer_pool.DriveTransferOps,
   native_policy native_policy: entry.NativeDocPolicy,
   signal_status signal_status: fn(String, entry.SyncStatus) -> Nil,
+  status_socket_path status_socket_path: String,
 ) -> Result(Daemon, actor.StartError) {
   let state_owner_name = process.new_name(prefix: "state_owner")
   let local_watcher_name = process.new_name(prefix: "local_watcher")
   let remote_poller_name = process.new_name(prefix: "remote_poller")
   let reconciler_name = process.new_name(prefix: "reconciler")
   let transfer_pool_name = process.new_name(prefix: "transfer_pool")
+  let status_board_name = process.new_name(prefix: "status_board")
+  let status_board_subject = process.named_subject(status_board_name)
 
   let poller_config =
     remote_poller.PollerConfig(
@@ -93,7 +102,15 @@ pub fn start_daemon(
       trash_remote: transfers.trash_remote,
       rename_remote: transfers.rename_remote,
       export_to_disk: transfers.export_to_disk,
-      signal_status: signal_status,
+      // Fan out: paint the emblem (gvfs) AND update the queryable board
+      // (the Dolphin plugin's socket) in one signal.
+      signal_status: fn(path, status) {
+        signal_status(path, status)
+        process.send(
+          status_board_subject,
+          status_board.MarkStatus(path, status),
+        )
+      },
       settle_upload: fn(path, outcome) {
         process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
       },
@@ -189,8 +206,44 @@ pub fn start_daemon(
       debounce_ms: watch_debounce_ms,
     )
 
+  let state_owner_subject = process.named_subject(state_owner_name)
+  let board_config =
+    status_board.BoardConfig(locate_known: fn(path) {
+      process.call(
+        state_owner_subject,
+        status_call_timeout_ms,
+        state_owner.FindKnownByPath(path, _),
+      )
+      != None
+    })
+  let answer_status = fn(line) {
+    let prefix = mirror_root <> "/"
+    case string.starts_with(line, prefix) {
+      False -> "unknown"
+      True -> {
+        let path = string.drop_start(line, string.length(prefix))
+        case
+          process.call(
+            status_board_subject,
+            status_call_timeout_ms,
+            status_board.FetchStatus(path, _),
+          )
+        {
+          Some(entry.Syncing) -> "syncing"
+          Some(entry.Synced) -> "synced"
+          None -> "unknown"
+        }
+      }
+    }
+  }
+
   static_supervisor.new(static_supervisor.OneForOne)
   |> static_supervisor.add(state_owner.supervised(state_owner_name, store))
+  // The board must be registered before anything signals transfers to it.
+  |> static_supervisor.add(status_board.supervised(
+    status_board_name,
+    board_config,
+  ))
   |> static_supervisor.add(local_watcher.supervised(
     local_watcher_name,
     watcher_config,
@@ -213,6 +266,10 @@ pub fn start_daemon(
     transfer_pool_name,
     transfer_config,
   ))
+  |> static_supervisor.add(status_server.supervised(
+    status_socket_path,
+    answer_status,
+  ))
   |> static_supervisor.start
   |> result.map(fn(supervisor) {
     Daemon(
@@ -222,6 +279,7 @@ pub fn start_daemon(
       remote_poller: process.named_subject(remote_poller_name),
       reconciler: process.named_subject(reconciler_name),
       transfer_pool: process.named_subject(transfer_pool_name),
+      status_board: status_board_subject,
     )
   })
 }

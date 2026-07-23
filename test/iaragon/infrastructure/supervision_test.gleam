@@ -7,8 +7,19 @@ import iaragon/infrastructure/drive/remote_poller
 import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/fs/local_watcher
 import iaragon/infrastructure/supervision
+import simplifile
+
+@external(erlang, "iaragon_status_client_ffi", "query_lines")
+fn query_lines(
+  sock_path: String,
+  lines: List(String),
+) -> Result(List(String), String)
 
 const call_timeout = 500
+
+const mirror_root = "build/test-scratch/supervision/mirror"
+
+const status_sock = "build/test-scratch/supervision/status.sock"
 
 fn an_ephemeral_store() -> state_owner.StateStore {
   state_owner.StateStore(
@@ -29,11 +40,13 @@ fn an_idle_drive_port() -> remote_poller.DrivePort {
 }
 
 pub fn daemon_tree_starts_and_actors_respond_test() {
+  let assert Ok(Nil) =
+    simplifile.create_directory_all("build/test-scratch/supervision")
   let assert Ok(daemon) =
     supervision.start_daemon(
       store: an_ephemeral_store(),
       drive: an_idle_drive_port(),
-      mirror_root: "build/test-scratch/supervision/mirror",
+      mirror_root: mirror_root,
       transfers: transfer_pool.DriveTransferOps(
         fetch_to_disk: fn(_file_id, _destination) { Error("not under test") },
         upload_to_drive: fn(_target, _source, _size) { Error("not under test") },
@@ -48,6 +61,7 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       ),
       native_policy: entry.LinkFile,
       signal_status: fn(_path, _status) { Nil },
+      status_socket_path: status_sock,
     )
 
   // No page token yet, so the first poll bootstraps one through the tree:
@@ -87,6 +101,17 @@ pub fn daemon_tree_starts_and_actors_respond_test() {
       _,
     ))
     == Some(known)
+
+  // The status socket answers like the Dolphin plugin will ask: absolute
+  // paths in, status words out. The known file above is synced; a stranger
+  // inside the mirror is unknown; anything outside the mirror is unknown.
+  assert query_lines(status_sock, [
+      mirror_root <> "/docs/report.txt",
+      mirror_root <> "/never-seen.txt",
+      "/somewhere/else.txt",
+    ])
+    == Ok(["synced", "unknown", "unknown"])
+
   process.send(daemon.state_owner, state_owner.ForgetKnown("id-1"))
   assert process.call(daemon.state_owner, call_timeout, state_owner.GetKnown(
       "id-1",

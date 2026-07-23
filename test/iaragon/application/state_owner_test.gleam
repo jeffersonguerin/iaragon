@@ -107,3 +107,17 @@ pub fn set_page_token_caches_and_writes_through_test() {
   assert process.call(owner, 500, state_owner.GetPageToken) == Some("tok-1")
   assert process.receive(calls, 500) == Ok(SavePageTokenCalled("tok-1"))
 }
+
+pub fn known_files_are_found_by_path_test() {
+  let calls = process.new_subject()
+  let known = a_known("id-7")
+  let owner = start_owner(a_recording_store(calls, [known], None))
+
+  assert process.call(owner, 500, state_owner.FindKnownByPath(
+      "docs/report.txt",
+      _,
+    ))
+    == Some(known)
+  assert process.call(owner, 500, state_owner.FindKnownByPath("nope.txt", _))
+    == None
+}

@@ -143,7 +143,8 @@ de arquivos.
 
 **AS 4 FASES DO ROADMAP ENTREGUES**: sync bidirecional com resolução de
 conflito, watcher local por inotify (fallback polling) e overlays de
-status via GVfs metadata (file managers GTK).
+status — GVfs metadata (file managers GTK) e plugin KOverlayIconPlugin +
+socket de status (Dolphin/KDE).
 
 Fase conflitos + watcher (sessão 6): política decidida pelo usuário —
 **edit-edit e both-created divergente viram cópia conflitada** estilo Dropbox
@@ -309,14 +310,33 @@ a escrita de verdade diferencia) e `build_status_painter` (no-op
 silencioso em máquina sem suporte — emblema é decoração, nunca falha
 transferência). FFI `run_command` roda executável SEM shell
 (spawn_executable + vetor de args — path com espaço/aspas não injeta).
-Limitações: Dolphin/KDE não lê gvfs metadata (precisaria de adapter
-próprio); aparência/existência dos emblemas depende do tema de ícones;
+Limitações: aparência/existência dos emblemas depende do tema de ícones;
 sem emblema de conflito (conflito se resolve em cópia, não é estado
 persistente).
 
-**Próximas sessões**: re-export ao trocar `NativeDocPolicy`, adapter de
-overlay para Dolphin/KDE, emblema de erro para transferências que
-esgotam retries.
+Fase overlays Dolphin/KDE (sessão 13): **socket de status + plugin
+KOverlayIconPlugin**. O daemon expõe um servidor de linha em socket Unix
+(`$XDG_RUNTIME_DIR/iaragon.sock`, senão `~/.local/share/iaragon/
+status.sock` — a MESMA ordem no plugin): path absoluto entra, palavra de
+status sai (`syncing|synced|unknown`), várias trocas por conexão. Fonte
+da verdade: ator `status_board` (application) — dict path→status
+alimentado pelo fan-out do `signal_status` do pool (emblema gvfs + board
+num sinal só; o board entra na árvore ANTES do pool, senão o send a nome
+não-registrado explode) — com fallback ao índice de knowns
+(`state_owner.FindKnownByPath`, varredura linear: índice é por file_id).
+FFI `iaragon_status_ffi` (gen_tcp `{local,path}`, packet line, socket
+velho deletado no bind; listen socket pertence ao ator supervisionado —
+`status_server.supervised` via `actor.new_with_initialiser`). Plugin C++
+em `integrations/dolphin/` (COMPILADO contra KF5 no container p/ validar;
+instalação no README): `getOverlays` NÃO PODE bloquear (contrato do KIO)
+→ cache TTL 3 s + `QLocalSocket` assíncrono + `overlaysChanged`; Dolphin
+carrega do namespace `kf5/overlayicon` (`kf6/` no Qt6 — verificado no
+fonte do Dolphin); emblemas `vcs-normal`/`vcs-update-required` (os dos
+plugins VCS, garantidos no Breeze). Limitação: atualização de estado
+aparece em até TTL+re-query (sem canal de push do daemon p/ o plugin).
+
+**Próximas sessões**: re-export ao trocar `NativeDocPolicy`, emblema de
+erro para transferências que esgotam retries.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

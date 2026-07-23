@@ -47,10 +47,21 @@ pub fn main() -> Nil {
       transfers: build_transfer_ops(config_dir),
       native_policy: entry.default_native_doc_policy(),
       signal_status: emblems.build_status_painter(mirror_root),
+      status_socket_path: resolve_status_socket_path(data_dir),
     )
   // Kick the pipeline: seed on the first cycle, then poll every interval.
   process.send(daemon.remote_poller, remote_poller.Poll)
   process.sleep_forever()
+}
+
+/// Where the file-manager plugin looks for the daemon, in the SAME order:
+/// the user runtime dir when the session provides one, the data dir
+/// otherwise. Keep in sync with integrations/dolphin.
+fn resolve_status_socket_path(data_dir: String) -> String {
+  case envoy.get("XDG_RUNTIME_DIR") {
+    Ok(runtime_dir) -> runtime_dir <> "/iaragon.sock"
+    Error(Nil) -> data_dir <> "/status.sock"
+  }
 }
 
 fn build_transfer_ops(config_dir: String) -> transfer_pool.DriveTransferOps {
