@@ -1,4 +1,5 @@
 import gleam/int
+import gleam/string
 import iaragon/infrastructure/drive/download
 import simplifile
 
@@ -103,4 +104,20 @@ pub fn the_export_url_carries_the_encoded_export_mime_test() {
     )
     == "https://www.googleapis.com/drive/v3/files/id-9/export"
     <> "?mimeType=application%2Fvnd.oasis.opendocument.text"
+}
+
+// PENTEST — file_id is Drive-supplied metadata. Google assigns opaque ids
+// today, but the builder must not depend on that: an id carrying `/`, `?` or
+// `#` must be percent-encoded so it cannot inject query params or walk the
+// path to a different endpoint on the API host.
+pub fn a_crafted_file_id_cannot_break_out_of_the_url_test() {
+  let evil = "id/../../tokeninfo?x=1"
+
+  let media = download.build_media_url(evil)
+  assert !string.contains(media, "id/../")
+  assert string.contains(media, "id%2F..%2F..%2Ftokeninfo%3Fx%3D1")
+
+  let export = download.build_export_url(evil, "text/plain")
+  assert !string.contains(export, "id/../")
+  assert string.contains(export, "id%2F..%2F..%2Ftokeninfo%3Fx%3D1/export")
 }

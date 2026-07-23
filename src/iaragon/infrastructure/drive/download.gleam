@@ -13,15 +13,18 @@ pub type DownloadError {
 }
 
 pub fn build_media_url(file_id: String) -> String {
-  "https://www.googleapis.com/drive/v3/files/" <> file_id <> "?alt=media"
+  "https://www.googleapis.com/drive/v3/files/"
+  <> uri.percent_encode(file_id)
+  <> "?alt=media"
 }
 
 /// Native-doc export (`files/{id}/export`). Same streaming download as
-/// `alt=media` behind it — only the URL differs. Export MIMEs contain `/`,
-/// so the query value is percent-encoded.
+/// `alt=media` behind it — only the URL differs. Both the id and the export
+/// MIME are percent-encoded: MIMEs contain `/`, and the id is untrusted
+/// metadata that must not be able to inject query params or walk the path.
 pub fn build_export_url(file_id: String, export_mime: String) -> String {
   "https://www.googleapis.com/drive/v3/files/"
-  <> file_id
+  <> uri.percent_encode(file_id)
   <> "/export?mimeType="
   <> uri.percent_encode(export_mime)
 }
