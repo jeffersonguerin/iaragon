@@ -9,7 +9,7 @@
 //// instead of one doomed gio call per transfer.
 
 import gleam/result
-import iaragon/domain/entry.{type SyncStatus, Synced, Syncing}
+import iaragon/domain/entry.{type SyncStatus, SyncFailed, Synced, Syncing}
 import simplifile
 
 /// Run an executable to completion: Ok(stdout) on exit 0, Error(output)
@@ -26,6 +26,7 @@ fn choose_emblem(status: SyncStatus) -> String {
   case status {
     Syncing -> "emblem-synchronizing"
     Synced -> "emblem-default"
+    SyncFailed -> "emblem-important"
   }
 }
 

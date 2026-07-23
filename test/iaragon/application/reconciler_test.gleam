@@ -364,6 +364,90 @@ pub fn native_docs_are_planned_as_exports_under_the_office_policy_test() {
   assert remote.kind == GoogleNative
 }
 
+pub fn a_policy_change_rematerializes_the_native_instead_of_moving_it_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  // Mirrored as a link back in the LinkFile era…
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      KnownFile(
+        ..a_synced_known("id-doc", "notes.desktop"),
+        md5: None,
+        kind: GoogleNative,
+      ),
+    ),
+  )
+  let stale_local =
+    LocalFile(path: "notes.desktop", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  // …but the daemon now runs under the Office export policy.
+  let sut =
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [stale_local],
+      Error("unused"),
+      idle_round_interval,
+      entry.ExportOffice,
+    )
+  let native =
+    RemoteSighting(
+      ..a_sighting("id-doc", "notes", "root"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [native]))
+
+  // Renaming notes.desktop to notes.docx would leave link bytes behind a
+  // document extension: the stale file goes away and a real export lands.
+  let assert [first, second] = receive_transfers(dispatches, 2)
+  assert [first, second]
+    |> list.contains(DeleteLocalDispatched("id-doc", "notes.desktop"))
+  let assert Ok(DownloadDispatched(remote)) =
+    [first, second]
+    |> list.find(fn(dispatch) {
+      case dispatch {
+        DownloadDispatched(_) -> True
+        _ -> False
+      }
+    })
+  assert remote.path == "notes.docx"
+}
+
+pub fn a_pure_native_rename_still_moves_locally_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(
+    owner,
+    state_owner.PutKnown(
+      KnownFile(
+        ..a_synced_known("id-doc", "notes.desktop"),
+        md5: None,
+        kind: GoogleNative,
+      ),
+    ),
+  )
+  let local =
+    LocalFile(path: "notes.desktop", size: 42, mtime_seconds: 1000, md5: None)
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [local], Error("unused"))
+  // Same LinkFile policy, remote rename only: extension is unchanged.
+  let native =
+    RemoteSighting(
+      ..a_sighting("id-doc", "plan", "root"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", [native]))
+
+  let assert [MoveLocalDispatched(updated, "notes.desktop")] =
+    receive_transfers(dispatches, 1)
+  assert updated.path == "plan.desktop"
+}
+
 pub fn changes_arriving_before_the_seed_request_a_reseed_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let dispatches = process.new_subject()

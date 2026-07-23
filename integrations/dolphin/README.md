@@ -7,6 +7,7 @@ arquivos do espelho (`~/GoogleDrive`) direto no Dolphin:
 |---|---|
 | `vcs-normal` (check) | sincronizado |
 | `vcs-update-required` | transferência em andamento |
+| `vcs-conflicting` | transferência esgotou os retries (re-tenta na rodada seguinte) |
 | (nenhum) | fora do espelho / desconhecido |
 
 O plugin conversa com o daemon pelo socket de status

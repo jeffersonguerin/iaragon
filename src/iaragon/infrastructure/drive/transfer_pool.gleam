@@ -328,7 +328,10 @@ fn settle_move_or_retry(
     state,
     failed_attempts,
     fn(attempts) { RetryMoveRemote(plan, attempts) },
-    give_up: fn() { state.config.settle_move(plan.file_id, Error(reason)) },
+    give_up: fn() {
+      state.config.signal_status(plan.to_path, entry.SyncFailed)
+      state.config.settle_move(plan.file_id, Error(reason))
+    },
   )
 }
 
@@ -357,6 +360,7 @@ fn run_conflict_copy(
         failed_attempts,
         fn(attempts) { RetryConflictCopy(remote, copy_path, attempts) },
         give_up: fn() {
+          state.config.signal_status(remote.path, entry.SyncFailed)
           state.config.settle_conflict(remote.path, Error(reason))
         },
       )
@@ -428,7 +432,9 @@ fn run_download(
         state,
         failed_attempts,
         fn(attempts) { RetryDownload(remote, attempts) },
-        give_up: fn() { Nil },
+        give_up: fn() {
+          state.config.signal_status(remote.path, entry.SyncFailed)
+        },
       )
       actor.continue(state)
     }
@@ -601,7 +607,10 @@ fn settle_upload_or_retry(
     state,
     failed_attempts,
     fn(attempts) { RetryUpload(plan, attempts) },
-    give_up: fn() { state.config.settle_upload(plan.local.path, Error(reason)) },
+    give_up: fn() {
+      state.config.signal_status(plan.local.path, entry.SyncFailed)
+      state.config.settle_upload(plan.local.path, Error(reason))
+    },
   )
 }
 

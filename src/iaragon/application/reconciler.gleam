@@ -383,10 +383,24 @@ fn run_round(state: State) -> State {
       decision.Conflict(path, file_id, kind) ->
         resolve_conflict(state, path, file_id, kind, remote_by_id)
       decision.MoveLocal(file_id, from, to) -> {
-        case dict.get(known_by_id, file_id) {
-          Ok(known) ->
-            config.dispatch_move_local(entry.KnownFile(..known, path: to), from)
-          Error(Nil) -> Nil
+        case dict.get(known_by_id, file_id), dict.get(remote_by_id, file_id) {
+          // A native whose EXTENSION changed did not move — its
+          // materialisation changed (NativeDocPolicy switch): renaming
+          // would leave stale bytes behind the new extension. Drop the old
+          // file and materialise fresh; the download's PutKnown fixes the
+          // index.
+          Ok(_known), Ok(remote) ->
+            case remote.kind, changed_extension(from, to) {
+              GoogleNative, True -> {
+                config.dispatch_delete_local(file_id, from)
+                config.dispatch_download(remote)
+              }
+              _, _ ->
+                dispatch_plain_move(config, known_by_id, file_id, from, to)
+            }
+          Ok(_known), Error(Nil) ->
+            dispatch_plain_move(config, known_by_id, file_id, from, to)
+          Error(Nil), _ -> Nil
         }
         state
       }
@@ -625,6 +639,26 @@ fn plan_remote_files(
       _, _ -> Error(Nil)
     }
   })
+}
+
+fn dispatch_plain_move(
+  config: ReconcilerConfig,
+  known_by_id: Dict(String, entry.KnownFile),
+  file_id: String,
+  from: String,
+  to: String,
+) -> Nil {
+  case dict.get(known_by_id, file_id) {
+    Ok(known) ->
+      config.dispatch_move_local(entry.KnownFile(..known, path: to), from)
+    Error(Nil) -> Nil
+  }
+}
+
+fn changed_extension(from: String, to: String) -> Bool {
+  let #(_, from_extension) = paths.split_extension(from)
+  let #(_, to_extension) = paths.split_extension(to)
+  from_extension != to_extension
 }
 
 fn materialized_path(

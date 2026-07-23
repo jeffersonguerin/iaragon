@@ -72,6 +72,28 @@ pub fn painting_syncing_sets_the_synchronizing_emblem_test() {
     ]
 }
 
+pub fn painting_failure_sets_the_important_emblem_test() {
+  let calls = process.new_subject()
+  let run = fn(exe, args) {
+    process.send(calls, #(exe, args))
+    Ok("")
+  }
+
+  assert emblems.paint_status(run, "/mirror", "doomed.txt", entry.SyncFailed)
+    == Ok(Nil)
+
+  let assert Ok(#("gio", args)) = process.receive(calls, 100)
+  assert args
+    == [
+      "set",
+      "-t",
+      "stringv",
+      "/mirror/doomed.txt",
+      "metadata::emblems",
+      "emblem-important",
+    ]
+}
+
 pub fn a_refused_gio_call_propagates_the_error_test() {
   let run = fn(_exe, _args) { Error("Setting attribute not supported") }
   let assert Error(_) =

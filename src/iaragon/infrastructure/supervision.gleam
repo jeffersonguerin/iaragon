@@ -231,6 +231,7 @@ pub fn start_daemon(
         {
           Some(entry.Syncing) -> "syncing"
           Some(entry.Synced) -> "synced"
+          Some(entry.SyncFailed) -> "failed"
           None -> "unknown"
         }
       }

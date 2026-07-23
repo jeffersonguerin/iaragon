@@ -64,12 +64,15 @@ pub type NativeDocPolicy {
   ExportOdf
 }
 
-/// The user-visible sync state of a mirrored path: a transfer in flight, or
-/// bytes settled on both sides. Presentation adapters (file-manager
-/// emblems…) translate this into whatever their medium shows.
+/// The user-visible sync state of a mirrored path: a transfer in flight,
+/// bytes settled on both sides, or a transfer that burnt all its retries
+/// (the next round re-decides it, flipping the state back to Syncing).
+/// Presentation adapters (file-manager emblems…) translate this into
+/// whatever their medium shows.
 pub type SyncStatus {
   Syncing
   Synced
+  SyncFailed
 }
 
 pub fn default_native_doc_policy() -> NativeDocPolicy {

@@ -272,12 +272,11 @@ o MESMO ponto de entrada — extensão e bytes nunca divergem).
 
 Limitações conhecidas: o size reportado do nativo é proxy do tamanho do
 EXPORT (diferem nos dois sentidos: export grande com size pequeno ainda
-re-tenta e falha por rodada; o inverso vira link sem tentar); trocar
-`NativeDocPolicy` com espelho povoado move o arquivo antigo para o path
-novo sem re-exportar (conteúdo velho até a próxima edição remota do doc);
-deleção local de pasta vazia não propaga (ver sessão 8); rename local com
-edição simultânea do conteúdo muda a assinatura e vira trash+re-upload
-(converge, mas re-transfere).
+re-tenta e falha por rodada; o inverso vira link sem tentar); deleção
+local de pasta vazia não propaga (ver sessão 8); rename local com edição
+simultânea do conteúdo muda a assinatura e vira trash+re-upload
+(converge, mas re-transfere). (Troca de `NativeDocPolicy` com espelho
+povoado: resolvida na sessão 14 — re-materializa.)
 
 Fase watcher inotify (sessão 11): **eventos reais de FS via filespy**
 atrás do mesmo `NoticeLocalActivity` — o debounce e o `ReconcileNow`
@@ -335,8 +334,20 @@ fonte do Dolphin); emblemas `vcs-normal`/`vcs-update-required` (os dos
 plugins VCS, garantidos no Breeze). Limitação: atualização de estado
 aparece em até TTL+re-query (sem canal de push do daemon p/ o plugin).
 
-**Próximas sessões**: re-export ao trocar `NativeDocPolicy`, emblema de
-erro para transferências que esgotam retries.
+Fase limpeza de backlog (sessão 14): **trocar `NativeDocPolicy`
+re-materializa o nativo** — decisão `MoveLocal` de nativo cuja EXTENSÃO
+mudou (materialização diferente, ex. `.desktop` → `.docx`) não vira
+rename (deixaria bytes velhos atrás da extensão nova): o reconciler
+despacha `EnqueueDeleteLocal(old)` + `EnqueueDownload` e o PutKnown do
+download conserta o índice; rename puro de nativo (mesma extensão)
+continua move barato. **`SyncFailed`**: terceira variante de
+`SyncStatus` sinalizada em TODO give-up do pool (download, upload,
+cópia de conflito, move remoto — trash não tem path); gvfs
+`emblem-important`, palavra `failed` no socket, `vcs-conflicting` no
+plugin Dolphin. A rodada seguinte re-despacha e sobrescreve com
+Syncing/Synced — falha é estado transitório visível, não terminal.
+
+**Backlog zerado.** Próximo trabalho novo = decisão de produto nova.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

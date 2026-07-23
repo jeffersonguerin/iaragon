@@ -330,6 +330,34 @@ pub fn an_upload_signals_syncing_then_synced_test() {
   assert process.receive(statuses, 1000) == Ok(#("mine.txt", entry.Synced))
 }
 
+pub fn a_download_that_burns_its_retries_signals_failure_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let statuses = process.new_subject()
+  let root = scratch_dir <> "/signal-failure"
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, fn(_id, _dest) { Error("always down") }),
+      signal_status: fn(path, status) {
+        process.send(statuses, #(path, status))
+      },
+    )
+  let pool = start_pool_with(config)
+
+  process.send(
+    pool,
+    transfer_pool.EnqueueDownload(a_remote("id-1", "doomed.txt")),
+  )
+
+  // One Syncing per attempt; the give-up marks the failure visibly.
+  assert process.receive(statuses, 1000) == Ok(#("doomed.txt", entry.Syncing))
+  assert fakes.retry_until(80, fn() {
+    case process.receive(statuses, 100) {
+      Ok(#("doomed.txt", entry.SyncFailed)) -> True
+      _ -> False
+    }
+  })
+}
+
 pub fn a_local_move_repaints_the_destination_test() {
   let owner = fakes.start_ephemeral_state_owner()
   let statuses = process.new_subject()

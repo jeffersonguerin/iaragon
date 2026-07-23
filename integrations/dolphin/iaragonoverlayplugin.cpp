@@ -23,6 +23,9 @@ QStringList overlaysForStatus(const QByteArray &status)
     if (status == "syncing") {
         return {QStringLiteral("vcs-update-required")};
     }
+    if (status == "failed") {
+        return {QStringLiteral("vcs-conflicting")};
+    }
     return {};
 }
 
