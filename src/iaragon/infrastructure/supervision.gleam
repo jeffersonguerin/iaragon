@@ -60,6 +60,17 @@ fn pad_two(value: Int) -> String {
   string.pad_start(int.to_string(value), 2, "0")
 }
 
+/// Send only if the target name is currently registered. A `process.send`
+/// to a NAMED subject whose owner is momentarily gone (the actor is
+/// restarting) raises in the sender — fine to skip for decoration messages,
+/// never to be used for feedback (settles) whose loss would strand state.
+fn send_best_effort(subject: Subject(a), message: a) -> Nil {
+  case process.subject_owner(subject) {
+    Ok(_) -> process.send(subject, message)
+    Error(_) -> Nil
+  }
+}
+
 /// Start the whole tree. The composition root injects the persistence store,
 /// the (authenticated) Drive port, the mirror location and the streaming
 /// download. The pipeline is wired here: poller → reconciler →
@@ -103,10 +114,13 @@ pub fn start_daemon(
       rename_remote: transfers.rename_remote,
       export_to_disk: transfers.export_to_disk,
       // Fan out: paint the emblem (gvfs) AND update the queryable board
-      // (the Dolphin plugin's socket) in one signal.
+      // (the Dolphin plugin's socket) in one signal. The board send is
+      // best-effort: status is decoration, and a send to the board's name
+      // while it is mid-restart would otherwise raise in — and crash — the
+      // transfer pool, aborting a live transfer.
       signal_status: fn(path, status) {
         signal_status(path, status)
-        process.send(
+        send_best_effort(
           status_board_subject,
           status_board.MarkStatus(path, status),
         )
@@ -207,20 +221,30 @@ pub fn start_daemon(
     )
 
   let state_owner_subject = process.named_subject(state_owner_name)
+  // Both lookups are decoration for the file-manager overlay: if the target
+  // actor is momentarily unregistered (restarting), answer "not known"
+  // rather than let the synchronous call crash the board / the socket
+  // client process.
   let board_config =
     status_board.BoardConfig(locate_known: fn(path) {
-      process.call(
-        state_owner_subject,
-        status_call_timeout_ms,
-        state_owner.FindKnownByPath(path, _),
-      )
-      != None
+      case process.subject_owner(state_owner_subject) {
+        Ok(_) ->
+          process.call(
+            state_owner_subject,
+            status_call_timeout_ms,
+            state_owner.FindKnownByPath(path, _),
+          )
+          != None
+        Error(_) -> False
+      }
     })
   let answer_status = fn(line) {
     let prefix = mirror_root <> "/"
-    case string.starts_with(line, prefix) {
-      False -> "unknown"
-      True -> {
+    case
+      string.starts_with(line, prefix),
+      process.subject_owner(status_board_subject)
+    {
+      True, Ok(_) -> {
         let path = string.drop_start(line, string.length(prefix))
         case
           process.call(
@@ -235,6 +259,7 @@ pub fn start_daemon(
           None -> "unknown"
         }
       }
+      _, _ -> "unknown"
     }
   }
 

@@ -404,12 +404,23 @@ ANTES do `reconcile_all`, então um arquivo não-relacionado que só colide na
 assinatura é rejeitado (cai no delete+create seguro) em vez de renomear o
 remoto errado. Hash falho → fallback ao size+mtime (comportamento antigo).
 
+Fase hardening — decoração best-effort (sessão 15, resolvido F8): os
+sends/calls que só alimentam o overlay (`signal_status` → board,
+`locate_known` e o `answer_status` do socket) checam `subject_owner` antes:
+alvo mid-restart (nome não-registrado) → pula/responde "unknown" em vez de
+explodir no remetente. Crucial: o send de `signal_status` era um dos
+gatilhos de crash do PROPRIO pool (abortava transferência); agora não é.
+Os `settle_*` (feedback, não decoração) NÃO são best-effort de propósito —
+perder um settle vazaria estado.
+
 Residuais rastreados (não perda-de-dados silenciosa; documentados):
-- **OTP best-effort**: `signal_status`/`locate_known` podem derrubar
-  pool/board se o alvo estiver reiniciando (send a nome não-registrado
-  explode no remetente); e `pending_*` do reconciler não são limpos no DOWN
-  do pool. Ambos mitigados pela tolerância de restart; fix pleno pede
-  rescue via FFI e monitor.
+- **pending_* no DOWN do pool (F2)**: se o `transfer_pool` cai com um
+  upload/trash/move em voo, o `pending_*` correspondente no reconciler
+  nunca é limpo (o settle não chega) e aquele path/id para de sincronizar
+  até o reconciler reiniciar. Liveness, não perda de bytes; gatilho já
+  bem mais raro (o crash por `signal_status` sumiu). Fix pleno: reconciler
+  monitora o pool e limpa os pending no DOWN — mudança de selector de ator,
+  para sessão dedicada.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
