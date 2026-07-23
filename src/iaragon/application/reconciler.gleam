@@ -107,6 +107,12 @@ pub type Command {
   /// Run a round without new remote input — local edits have no other
   /// trigger until a filesystem watcher lands.
   ReconcileNow
+  /// The monitored transfer pool went down (delivered by its monitor). Any
+  /// upload/trash/move it was carrying will never settle, so the matching
+  /// pending guards must be dropped — otherwise those paths/ids would stop
+  /// syncing until this actor itself restarts. The next round re-dispatches
+  /// whatever is still needed against the restarted pool.
+  ForgetInFlight
 }
 
 pub type ReconcilerConfig {
@@ -130,6 +136,10 @@ pub type ReconcilerConfig {
     /// Ask the poller for a fresh seed — used when observations arrive but
     /// the in-memory model is gone (this actor was restarted).
     request_seed: fn() -> Nil,
+    /// Resolve the transfer pool's current pid so this actor can monitor it.
+    /// Error while the pool is (re)starting; the monitor is retried on the
+    /// next message. In production this is `subject_owner` of the pool's name.
+    resolve_pool_pid: fn() -> Result(process.Pid, Nil),
     scan_local: fn() -> Result(List(LocalFile), String),
     /// Hash a mirror-relative path on demand (md5, lowercase hex).
     hash_local_file: fn(String) -> Result(String, String),
@@ -156,6 +166,10 @@ type State {
     pending_trashes: Set(String),
     pending_conflicts: Set(String),
     pending_move_paths: Dict(String, String),
+    /// The live monitor on the transfer pool, if one is established. `None`
+    /// before the pool is first seen and after it goes down (re-established
+    /// on the next message via `ensure_pool_monitored`).
+    pool_monitor: Option(process.Monitor),
   )
 }
 
@@ -178,16 +192,30 @@ pub fn start(
   name: Name(Command),
   config: ReconcilerConfig,
 ) -> actor.StartResult(Subject(Command)) {
-  actor.new(State(
-    config: config,
-    self: process.named_subject(name),
-    root_id: None,
-    model: dict.new(),
-    pending_uploads: set.new(),
-    pending_trashes: set.new(),
-    pending_conflicts: set.new(),
-    pending_move_paths: dict.new(),
-  ))
+  actor.new_with_initialiser(1000, fn(subject) {
+    // A catch-all monitor selector installed once: every pool monitor this
+    // actor sets up later delivers its Down through here as ForgetInFlight.
+    // The default subject must be re-selected explicitly — a custom selector
+    // replaces the built-in one.
+    let selector =
+      process.new_selector()
+      |> process.select(subject)
+      |> process.select_monitors(fn(_down) { ForgetInFlight })
+    actor.initialised(State(
+      config: config,
+      self: process.named_subject(name),
+      root_id: None,
+      model: dict.new(),
+      pending_uploads: set.new(),
+      pending_trashes: set.new(),
+      pending_conflicts: set.new(),
+      pending_move_paths: dict.new(),
+      pool_monitor: None,
+    ))
+    |> actor.selecting(selector)
+    |> actor.returning(subject)
+    |> Ok
+  })
   |> actor.on_message(handle_command)
   |> actor.named(name)
   |> actor.start
@@ -197,6 +225,7 @@ fn handle_command(
   state: State,
   command: Command,
 ) -> actor.Next(State, Command) {
+  let state = ensure_pool_monitored(state)
   case command {
     SeedMirror(root_id, files) -> {
       let model =
@@ -289,6 +318,36 @@ fn handle_command(
       )
       actor.continue(run_round_if_seeded(state))
     }
+    ForgetInFlight ->
+      // The pool crashed: nothing it was carrying is in flight any more, so
+      // clear every pending guard and forget the (now dead) monitor. No round
+      // is run here — the pool may still be mid-restart, and re-dispatch is
+      // safely handled by the next round (the periodic backstop, at latest).
+      actor.continue(
+        State(
+          ..state,
+          pending_uploads: set.new(),
+          pending_trashes: set.new(),
+          pending_conflicts: set.new(),
+          pending_move_paths: dict.new(),
+          pool_monitor: None,
+        ),
+      )
+  }
+}
+
+/// Keep a live monitor on the transfer pool whenever it is resolvable. Cheap
+/// and idempotent: once a monitor exists it is left alone (its Down clears it),
+/// and while the pool is (re)starting the resolver errors and the monitor is
+/// retried on the next message.
+fn ensure_pool_monitored(state: State) -> State {
+  case state.pool_monitor {
+    Some(_already_monitoring) -> state
+    None ->
+      case state.config.resolve_pool_pid() {
+        Ok(pid) -> State(..state, pool_monitor: Some(process.monitor(pid)))
+        Error(Nil) -> state
+      }
   }
 }
 

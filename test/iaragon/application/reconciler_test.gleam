@@ -65,6 +65,7 @@ fn start_reconciler_with_interval(
   hash_outcome: Result(String, String),
   round_interval_ms: Int,
   native_policy: entry.NativeDocPolicy,
+  resolve_pool_pid: fn() -> Result(process.Pid, Nil),
 ) -> Subject(reconciler.Command) {
   let name = process.new_name(prefix: "reconciler_test")
   let assert Ok(_) =
@@ -72,6 +73,7 @@ fn start_reconciler_with_interval(
       name,
       ReconcilerConfig(
         state_owner: owner,
+        resolve_pool_pid: resolve_pool_pid,
         dispatch_download: fn(remote, _expected) {
           process.send(dispatches, DownloadDispatched(remote))
         },
@@ -123,7 +125,18 @@ fn start_reconciler(
     hash_outcome,
     idle_round_interval,
     LinkFile,
+    fn() { Error(Nil) },
   )
+}
+
+/// An unlinked, name-registered stand-in for the transfer pool: killing it
+/// fires the monitor the reconciler sets up, and its name auto-unregisters so
+/// `subject_owner` reports it gone (exactly what the composition injects).
+fn start_fake_pool() -> #(process.Pid, process.Name(Nil)) {
+  let name = process.new_name(prefix: "fake_pool")
+  let pid = process.spawn_unlinked(fn() { process.sleep_forever() })
+  let assert Ok(Nil) = process.register(pid, name)
+  #(pid, name)
 }
 
 fn receive_transfers(
@@ -351,6 +364,7 @@ pub fn native_docs_are_planned_as_exports_under_the_office_policy_test() {
       Error("unused"),
       idle_round_interval,
       entry.ExportOffice,
+      fn() { Error(Nil) },
     )
   let native =
     RemoteSighting(
@@ -392,6 +406,7 @@ pub fn a_policy_change_rematerializes_the_native_instead_of_moving_it_test() {
       Error("unused"),
       idle_round_interval,
       entry.ExportOffice,
+      fn() { Error(Nil) },
     )
   let native =
     RemoteSighting(
@@ -960,6 +975,7 @@ pub fn rounds_repeat_on_the_configured_interval_test() {
       Error("unused"),
       25,
       LinkFile,
+      fn() { Error(Nil) },
     )
 
   process.send(sut, reconciler.SeedMirror("root", []))
@@ -968,5 +984,57 @@ pub fn rounds_repeat_on_the_configured_interval_test() {
   let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
   let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
   let assert Ok(LocalScanned) = process.receive(dispatches, 1000)
+  Nil
+}
+
+// --- Pool crash recovery (F2) -------------------------------------------------
+
+pub fn a_pool_crash_clears_in_flight_so_stranded_work_redispatches_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  // A synced blob that vanished locally: the round decides DeleteRemote and
+  // marks its file_id pending_trashes until a settle arrives.
+  process.send(
+    owner,
+    state_owner.PutKnown(KnownFile(
+      file_id: "id-1",
+      path: "gone.txt",
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: Some("aaa"),
+      size: 42,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )),
+  )
+  let dispatches = process.new_subject()
+  let #(pool_pid, pool_name) = start_fake_pool()
+  let sut =
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [],
+      Error("unused"),
+      idle_round_interval,
+      LinkFile,
+      fn() { process.subject_owner(process.named_subject(pool_name)) },
+    )
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "gone.txt", "root")]),
+  )
+  let assert [TrashDispatched("id-1")] = receive_transfers(dispatches, 1)
+
+  // Still pending: a fresh round must NOT re-dispatch the same trash.
+  process.send(sut, reconciler.ReconcileNow)
+  assert expect_no_transfers(dispatches)
+
+  // The pool dies with the trash in flight — the settle will never arrive.
+  // The reconciler's monitor must fire and clear the stranded pending set.
+  process.kill(pool_pid)
+  process.sleep(100)
+
+  // The next round re-dispatches the work the dead pool never finished.
+  process.send(sut, reconciler.ReconcileNow)
+  let assert [TrashDispatched("id-1")] = receive_transfers(dispatches, 1)
   Nil
 }

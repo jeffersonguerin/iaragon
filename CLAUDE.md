@@ -413,14 +413,26 @@ gatilhos de crash do PROPRIO pool (abortava transferência); agora não é.
 Os `settle_*` (feedback, não decoração) NÃO são best-effort de propósito —
 perder um settle vazaria estado.
 
-Residuais rastreados (não perda-de-dados silenciosa; documentados):
-- **pending_* no DOWN do pool (F2)**: se o `transfer_pool` cai com um
-  upload/trash/move em voo, o `pending_*` correspondente no reconciler
-  nunca é limpo (o settle não chega) e aquele path/id para de sincronizar
-  até o reconciler reiniciar. Liveness, não perda de bytes; gatilho já
-  bem mais raro (o crash por `signal_status` sumiu). Fix pleno: reconciler
-  monitora o pool e limpa os pending no DOWN — mudança de selector de ator,
-  para sessão dedicada.
+Fase hardening — pending no DOWN do pool (sessão 16, resolvido F2):
+**o reconciler monitora o `transfer_pool` e limpa TODO o pending no DOWN**.
+Se o pool cai com upload/trash/move em voo, o settle correspondente nunca
+chega e aquele path/id parava de sincronizar até o reconciler reiniciar
+(liveness, não perda de bytes). Agora o reconciler usa
+`new_with_initialiser` com um seletor `select_monitors` catch-all instalado
+UMA vez → todo `process.monitor` posterior entrega o DOWN como o comando
+`ForgetInFlight`. `ensure_pool_monitored` (topo de cada mensagem) mantém um
+monitor vivo enquanto o pool é resolvível (`resolve_pool_pid` injetado =
+`subject_owner` do nome do pool; erra durante o (re)start, re-tenta na
+mensagem seguinte). `ForgetInFlight` zera os quatro pending
+(`pending_uploads/trashes/conflicts/move_paths`) e esquece o monitor (None →
+re-monitora o pool reiniciado). **Não roda rodada no DOWN** (o pool pode
+estar mid-restart e o send explodiria); o re-despacho fica com a próxima
+rodada — o backstop periódico de 30 s no pior caso. Re-despacho é seguro:
+nada do pool morto está mesmo em voo, e trash/move/upload re-despachados são
+idempotentes. O seletor do `process.call` ao state_owner (monitor próprio,
+com demonitor) não interfere no catch-all.
+
+Backlog de residuais zerado.
 
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção

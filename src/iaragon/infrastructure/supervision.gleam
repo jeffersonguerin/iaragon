@@ -207,6 +207,11 @@ pub fn start_daemon(
           remote_poller.Reseed,
         )
       },
+      // Let the reconciler monitor the pool so a pool crash with a transfer in
+      // flight clears the matching pending guard instead of stranding that
+      // path/id (its settle would never arrive). Errors while the pool is
+      // (re)starting; the reconciler retries the monitor on its next message.
+      resolve_pool_pid: fn() { process.subject_owner(transfer_pool_subject) },
       scan_local: fn() { local_scan.scan_mirror(mirror_root) },
       hash_local_file: fn(path) { hashing.hash_mirror_file(mirror_root, path) },
       native_policy: native_policy,
