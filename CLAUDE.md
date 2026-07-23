@@ -434,6 +434,47 @@ com demonitor) não interfere no catch-all.
 
 Backlog de residuais zerado.
 
+Fase pentest de segurança (sessão 16): 3 subagentes adversariais em
+paralelo (auth/OAuth, persistência/injeção, FS/paths/FFI/socket), cada
+achado verificado por leitura antes do fix, cada fix com pentest TDD.
+Corrigido:
+- **Injeção em `.desktop` (HIGH)**: `write_link_file` interpolava o NOME e
+  o file_id crus do Drive no arquivo `.desktop`. Nome com `\n` injeta
+  `Type=Application`+`Exec=` (GKeyFile honra o último valor de chave
+  duplicada) → RCE ao clicar no file manager. Novo módulo PURO
+  `domain/link_file.build` escapa todo valor por spec Desktop Entry
+  (backslash primeiro, depois `\n`/`\r`/`\t`); o pool delega. Vale para
+  nativo-LinkFile E shortcut.
+- **Loopback OAuth sem `packet_size` (MED)**: qualquer processo local
+  alcança a porta efêmera do redirect na janela de login; request line
+  ilimitada = OOM. Capado em `{packet_size, 8192}` (paridade com o status
+  socket). Linha longa vira `{error, emsgsize}` limpo.
+- **file_id sem percent-encode nos URL builders (LOW)**: `build_media_url`
+  /`build_export_url` concatenavam o file_id cru; `uri.percent_encode` nos
+  dois (ids são opacos hoje, mas não depender disso).
+- **Acceptor do status socket (LOW)**: `ok = gen_tcp:controlling_process`
+  podia badmatch em `{error, closed}` (peer aborta no meio do handoff) e
+  derrubar o acceptor; agora casa `{error,_}` e dropa só aquele cliente.
+  Corrida timing-dependente NÃO reproduzida (barrage de 400 aborts com RST
+  não disparou) — guard de robustez adicionado; fix é defesa de qualquer
+  forma.
+- **Corrida de startup do poller (robustez, exposta pelo pentest)**: o
+  poller inicia ANTES do reconciler e auto-dispara Poll; semear rápido
+  mandava `SeedMirror` ao subject nomeado do reconciler ainda não
+  registrado → `send` a nome não-registrado CRASHAVA o poller (deixava o
+  smoke test flaky, queimava restart budget). Entrega agora via guard
+  `deliver` (checa `subject_owner`; erra transiente → retry do Poll);
+  seeded/token só avançam após entrega OK (seed/mudanças nunca perdidos).
+
+Negativos verificados (não é vulnerabilidade): SQLi — todas as queries
+parametrizadas; parsing de int64-como-string crash-safe; CSRF/state e PKCE
+(S256, verifier CSPRNG) corretos; segredos sem payload em erros; path
+traversal (`sanitize_segment`) cobre os vetores reais no alvo Linux;
+emblems FFI sem shell (argv vector); delete não-recursivo p/ blob; scan
+pula symlink. Não-corrigido (robustez/quota, não segurança): arquivo
+remoto literalmente nomeado `*.iaragon-partial` fica invisível ao scan
+(exclusão por nome) → re-download por rodada; documentado.
+
 Fatos de API que os testes fixam: `size` e demais int64 chegam como STRING no
 JSON do Drive; `changes.list` e `files.list` recebem `fields` com a projeção
 exata usada no parser (incl. `shortcutDetails(targetId)`); um redirect OAuth sem `code`/`error` é malformado, e
