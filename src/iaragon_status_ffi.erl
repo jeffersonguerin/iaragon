@@ -36,7 +36,15 @@ accept_clients(Listen, Answer) ->
     case gen_tcp:accept(Listen) of
         {ok, Client} ->
             Server = spawn(fun() -> serve_client(Client, Answer) end),
-            ok = gen_tcp:controlling_process(Client, Server),
+            %% Hand the socket to the per-client server. A peer that aborted
+            %% between accept and here can make controlling_process return
+            %% {error, closed}; drop that one client instead of letting an
+            %% `ok =` assertion crash the acceptor (which would take the listen
+            %% socket down until the supervisor restarts it).
+            case gen_tcp:controlling_process(Client, Server) of
+                ok -> ok;
+                {error, _} -> gen_tcp:close(Client)
+            end,
             accept_clients(Listen, Answer);
         {error, closed} ->
             ok;

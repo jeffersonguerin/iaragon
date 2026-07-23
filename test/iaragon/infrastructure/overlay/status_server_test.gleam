@@ -12,6 +12,9 @@ fn query_lines(
   lines: List(String),
 ) -> Result(List(String), String)
 
+@external(erlang, "iaragon_status_client_ffi", "slam")
+fn slam(sock_path: String, times: Int) -> Nil
+
 const sock_dir = "build/test-scratch/status-server"
 
 pub fn each_request_line_gets_its_answer_test() {
@@ -41,6 +44,27 @@ pub fn the_socket_is_owner_only_test() {
   // The status protocol reveals which files exist in the mirror, so no
   // other local user may connect.
   assert simplifile.file_info_permissions_octal(info) == 0o600
+}
+
+// PENTEST — a local peer (same user; the socket is 0600) that connects and
+// aborts repeatedly races the acceptor's controlling_process handoff. If that
+// handoff badmatches on the closed socket the acceptor dies, taking the listen
+// socket with it. The server must shrug off the barrage and keep answering.
+pub fn the_server_survives_a_barrage_of_aborted_connections_test() {
+  let assert Ok(Nil) = simplifile.create_directory_all(sock_dir)
+  let sock = sock_dir <> "/barrage.sock"
+  let _ = simplifile.delete(sock)
+  let assert Ok(_) =
+    status_server.start(sock, fn(line) {
+      case line {
+        "/mirror/a.txt" -> "synced"
+        _ -> "unknown"
+      }
+    })
+
+  slam(sock, 400)
+
+  assert query_lines(sock, ["/mirror/a.txt"]) == Ok(["synced"])
 }
 
 pub fn a_stale_socket_file_is_replaced_on_start_test() {

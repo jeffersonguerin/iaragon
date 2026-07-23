@@ -1,7 +1,23 @@
 %% Test helper: a line-protocol client for the status socket, so tests can
 %% talk to the server exactly like the Dolphin plugin does.
 -module(iaragon_status_client_ffi).
--export([query_lines/2]).
+-export([query_lines/2, slam/2]).
+
+%% Abusive client: connect and abort (RST via linger 0) N times as fast as
+%% possible, to race the acceptor's controlling_process call. Returns nil.
+slam(SockPath, N) ->
+    slam_loop(binary_to_list(SockPath), N),
+    nil.
+
+slam_loop(_Path, 0) ->
+    ok;
+slam_loop(Path, N) ->
+    case gen_tcp:connect({local, Path}, 0,
+                         [binary, {active, false}, {linger, {true, 0}}], 1000) of
+        {ok, Sock} -> gen_tcp:close(Sock);
+        {error, _} -> ok
+    end,
+    slam_loop(Path, N - 1).
 
 query_lines(SockPath, Lines) ->
     Options = [binary, {packet, line}, {active, false}],
