@@ -122,6 +122,30 @@ fn validate_session_uri(session_url: String) -> Result(String, DriveError) {
   }
 }
 
+fn finalize_empty_upload(
+  send: SendBits,
+  session_url: String,
+) -> Result(ChangedFile, DriveError) {
+  use put <- result.try(
+    request.to(session_url)
+    |> result.replace_error(UnexpectedPayload(
+      "unparseable session URI: " <> session_url,
+    )),
+  )
+  let put =
+    put
+    |> request.set_method(http.Put)
+    |> request.set_header("content-range", "bytes */0")
+    |> request.set_body(<<>>)
+  use response <- result.try(send(put) |> result.map_error(TransportFailed))
+  case response.status {
+    200 | 201 ->
+      json.parse(from: response.body, using: changes.changed_file_decoder())
+      |> result.replace_error(UnexpectedPayload(response.body))
+    status -> Error(RefusedByServer(status, response.body))
+  }
+}
+
 fn send_chunks(
   send: SendBits,
   session_url: String,
@@ -136,13 +160,22 @@ fn send_chunks(
   )
   case chunk {
     EndOfFile ->
-      Error(UnexpectedPayload(
-        "the file ended at byte "
-        <> int.to_string(offset)
-        <> " but "
-        <> int.to_string(total_size)
-        <> " were promised",
-      ))
+      case total_size == 0 && offset == 0 {
+        // A genuinely empty file: nothing to PUT, so finalize the session
+        // with an empty body. Drive's docs don't spell out the 0-byte case;
+        // this uses the documented `bytes */TOTAL` finalize form (TOTAL = 0),
+        // as Google's own client libraries do. Not verified end-to-end
+        // against a live 0-byte upload.
+        True -> finalize_empty_upload(send, session_url)
+        False ->
+          Error(UnexpectedPayload(
+            "the file ended at byte "
+            <> int.to_string(offset)
+            <> " but "
+            <> int.to_string(total_size)
+            <> " were promised",
+          ))
+      }
     NextChunk(bytes) -> {
       let length = bit_array.byte_size(bytes)
       let content_range =

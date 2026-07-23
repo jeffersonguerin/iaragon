@@ -106,6 +106,45 @@ pub fn creating_a_file_uploads_all_chunks_test() {
   assert second.body == <<"ef":utf8>>
 }
 
+// A 0-byte file has no chunk to send: the session is finalized with an empty
+// body and the total-known Content-Range form (bytes */0). Without this the
+// upload errored at byte 0 and empty files never synced.
+pub fn an_empty_file_is_finalized_with_a_zero_range_test() {
+  let inbox = process.new_subject()
+  let source = a_source_file("empty.txt", "")
+  let send = fn(sent: request.Request(BitArray)) {
+    process.send(inbox, sent)
+    case request.get_header(sent, "content-range") {
+      Error(Nil) ->
+        Ok(response.Response(
+          status: 200,
+          headers: [#("location", session_url)],
+          body: "",
+        ))
+      Ok("bytes */0") ->
+        Ok(response.Response(status: 200, headers: [], body: a_file_payload))
+      Ok(other) -> panic as { "unexpected content-range: " <> other }
+    }
+  }
+
+  let assert Ok(uploaded) =
+    upload.upload_file(
+      send,
+      access_token: "at-1",
+      target: CreateFile(name: "empty.txt", parent_id: "p-1"),
+      source_path: source,
+      total_size: 0,
+      chunk_size: 8,
+    )
+  let assert ChangedFile(file_id: "id-up", ..) = uploaded
+
+  let assert Ok(_initiate) = process.receive(inbox, 100)
+  let assert Ok(finalize) = process.receive(inbox, 100)
+  assert finalize.method == http.Put
+  assert request.get_header(finalize, "content-range") == Ok("bytes */0")
+  assert finalize.body == <<>>
+}
+
 pub fn updating_targets_the_existing_file_id_test() {
   let inbox = process.new_subject()
   let source = a_source_file("update.txt", "abcdef")
