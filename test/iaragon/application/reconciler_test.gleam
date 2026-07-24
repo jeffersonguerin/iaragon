@@ -1285,3 +1285,28 @@ pub fn a_failed_scan_skips_the_round_instead_of_crashing_test() {
   process.send(reconciler_subject, reconciler.ReconcileNow)
   assert process.receive(trouble, 500) == Error(Nil)
 }
+
+pub fn a_materialized_native_never_collides_with_a_sibling_blob_test() {
+  // A Doc named `notes` materialises (default policy) as `notes.desktop` —
+  // the SAME final path as a sibling blob literally named `notes.desktop`.
+  // Materialisation must take part in disambiguation: two fileIds sharing
+  // one local path would otherwise overwrite each other locally and then
+  // corrupt each other REMOTELY (download-over, then upload-back ping-pong).
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+  let doc =
+    RemoteSighting(
+      ..a_sighting("id-doc", "notes", "root"),
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+    )
+  let blob = a_sighting("id-blob", "notes.desktop", "root")
+
+  process.send(sut, reconciler.SeedMirror("root", [doc, blob]))
+
+  let assert [DownloadDispatched(first), DownloadDispatched(second)] =
+    receive_transfers(dispatches, 2)
+  assert first.path != second.path
+}

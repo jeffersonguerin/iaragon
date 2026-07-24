@@ -19,6 +19,9 @@ import simplifile
 
 pub const trash_dir_name = ".iaragon-trash"
 
+@external(erlang, "iaragon_file_ffi", "touch_now")
+fn touch_now(path: String) -> Result(Nil, String)
+
 pub fn move_to_trash(
   root_dir: String,
   relative_path: String,
@@ -29,8 +32,18 @@ pub fn move_to_trash(
     simplifile.create_directory_all(parent_of(destination))
     |> result.map_error(simplifile.describe_error),
   )
-  simplifile.rename(at: source, to: free_variant_of(destination, 2))
-  |> result.map_error(simplifile.describe_error)
+  let landed = free_variant_of(destination, 2)
+  use Nil <- result.try(
+    simplifile.rename(at: source, to: landed)
+    |> result.map_error(simplifile.describe_error),
+  )
+  // `rename` preserves mtime, but the sweep judges age by mtime — without a
+  // touch, retention would measure "when was the content last edited" and an
+  // old file trashed today would die at the next boot. Best-effort: the file
+  // IS safely in the trash either way, and failing the whole delete flow
+  // over a timestamp would be worse than a shorter window.
+  let _ = touch_now(landed)
+  Ok(Nil)
 }
 
 /// Remove trash entries older than the retention. Best-effort by design:

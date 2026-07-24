@@ -30,6 +30,11 @@ const partial_dir_name = ".iaragon-partial"
 /// by LOCATION like the partial dir, so its contents are never re-uploaded.
 const trash_dir_name = ".iaragon-trash"
 
+/// Reserved marker file the emblem-support probe writes (and normally
+/// deletes) in the mirror root. Skipped so a leftover from a failed delete
+/// is never mistaken for user content and uploaded.
+const emblem_probe_name = ".iaragon-emblem-probe"
+
 pub fn scan_mirror(root_dir: String) -> Result(List(LocalFile), String) {
   use Nil <- result.try(
     simplifile.create_directory_all(root_dir) |> describe_error,
@@ -40,7 +45,11 @@ pub fn scan_mirror(root_dir: String) -> Result(List(LocalFile), String) {
 fn walk(dir: String, root_dir: String) -> Result(List(LocalFile), String) {
   use names <- result.try(simplifile.read_directory(dir) |> describe_error)
   list.try_fold(names, [], fn(acc, name) {
-    case name == partial_dir_name || name == trash_dir_name {
+    case
+      name == partial_dir_name
+      || name == trash_dir_name
+      || name == emblem_probe_name
+    {
       // Control directories (in-flight downloads, local trash) — never part
       // of the mirror.
       True -> Ok(acc)

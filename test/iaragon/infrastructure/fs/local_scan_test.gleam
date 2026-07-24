@@ -83,3 +83,19 @@ pub fn a_missing_mirror_root_is_created_empty_test() {
   let assert Ok([]) = local_scan.scan_mirror(root)
   assert simplifile.is_directory(root) == Ok(True)
 }
+
+pub fn the_emblem_probe_file_is_never_scanned_test() {
+  // detect_emblem_support drops `.iaragon-emblem-probe` in the mirror root
+  // and deletes it; if that delete ever fails, the leftover must not be
+  // mistaken for user content and uploaded to Drive.
+  let root = "build/test-scratch/local-scan/emblem-probe"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/.iaragon-emblem-probe", contents: "")
+  let assert Ok(Nil) = simplifile.write(to: root <> "/real.txt", contents: "x")
+
+  let assert Ok(files) = local_scan.scan_mirror(root)
+
+  assert list.map(files, fn(f) { f.path }) == ["real.txt"]
+}

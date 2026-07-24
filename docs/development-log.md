@@ -279,3 +279,72 @@ toolchain e precisão de doc (o fix do CVE em inets 9.7.1 é OTP 29.0.2+,
 mitigado independentemente pelo FFI). Item observado p/ o futuro (OTP 30):
 `httpc` fecha `max_connections_open` ilimitado hoje — irrelevante com pool
 serial, mas setar explícito se surgir uso concorrente do httpc.
+
+## Sessão 24 (cont.) — revisão profunda de todo o repositório
+
+Três revisores adversariais em paralelo (domínio+aplicação; infraestrutura+
+FFIs; scripts+packaging+docs), com verificação própria de cada achado antes
+de corrigir. **Corrigidos nesta sessão** (cada um com teste de regressão):
+
+- **CRITICAL — colisão de path materializado**: a extensão de nativo/shortcut
+  era aplicada DEPOIS da desambiguação; Doc `notes` + blob `notes.desktop`
+  caíam no MESMO path local → sobrescrita local e corrupção remota em
+  ping-pong. Agora o nome materializado entra na resolução de paths.
+- **HIGH — inferência de rename limitada a Blob**: renomear o `.desktop` de um
+  nativo casava o par vanished/fresh (md5 ausente = checagem vazia) e
+  renomeava o Google Doc REMOTO, vazando a extensão.
+- **HIGH — relógio de retenção da lixeira**: `rename` preserva mtime, então o
+  sweep media "última edição do conteúdo", não tempo-na-lixeira — arquivo
+  antigo trashado hoje morria no boot seguinte (janela ~zero). `touch_now`
+  no destino ao trashar.
+- **MED — double-encoding de path nos FFIs do status socket**
+  (`binary_to_list`): com `$HOME` acentuado o daemon bindava um socket
+  sósia; plugin/tray não achavam e o doctor (igualmente mangleado)
+  mascarava. Binário UTF-8 passa como-está; teste fixa o nome no disco.
+- **LOW — probe de emblema no scan**: `.iaragon-emblem-probe` remanescente
+  não vira mais "conteúdo do usuário" (skip por localização).
+- Lote operacional: release `latest` era `--prerelease` (o alias
+  `releases/latest` do GitHub o ignora → fast-path prebuilt NUNCA disparava;
+  install.sh agora usa o path de TAG); `set -e` suprimido dentro de
+  `install_prebuilt` (falha pós-`rm -rf $LIBDIR` seguia e imprimia sucesso —
+  agora `|| die`); PKGBUILD não reescrevia o ExecStart da unit do doctor
+  (203/EXEC); pre-push tratava `git diff` FALHO como "nada mudou" (agora
+  fail-safe); tray saía invisível quando o serviço SNI morria (agora exit 1
+  p/ o systemd reiniciar) e vazava zumbis do xdg-open; bundle sem
+  LICENSE/NOTICE (compliance Apache na redistribuição do OTP); ERTS por
+  glob alfabético; .deb sem Depends/copyright; rpm sem %license; docs
+  dessincronizadas (unit "copiada" que nunca foi, 4 FFIs → 6, launchers).
+
+**Residuais confirmados, NÃO corrigidos (backlog priorizado):**
+
+1. (MED) `status_board` sem remoção de entradas: dict só cresce e um
+   `SyncFailed` de path depois deletado/renomeado prende o agregado
+   (`FetchOverall`/tray) em "failed" para sempre. Direção: `ClearStatus`
+   no delete/move + eviction.
+2. (MED) Corrida no DOWN do pool: `ForgetInFlight` pode limpar pendência já
+   re-despachada ao pool NOVO → segundo `files.create` → duplicata no
+   Drive. Direção: taggear pendências com a geração/pid do pool.
+3. (MED) Cache `created_folders` do pool nunca invalida: id de pasta morta
+   → loop de 404; pasta trashada → upload "para dentro da lixeira".
+   Direção: limpar cache em settle de falha.
+4. (MED) Refresh de token concorrente (poller×pool×doctor) com temp de nome
+   FIXO: interleaving raro pode renomear temp meio-escrito → tokens.json
+   corrompido → re-login manual. Direção: sufixo único no temp.
+5. (MED-LOW) Crash do reconciler multiplica cadeias do timer `ReconcileNow`
+   (uma por crash, para sempre — degradação cumulativa). Direção: geração
+   no timer.
+6. (LOW) Sends crus na cadeia do watcher amplificam um crash (até 3
+   restarts do budget); (LOW) edição local do `.desktop` de um Shortcut
+   vira `UploadLocal` no id do shortcut → livelock de retry; (LOW) rename
+   remoto de pasta deixa dir vazio órfão + known da pasta com path velho;
+   (LOW) `record_downloaded` faz stat DEPOIS do rename (janela de ms que
+   grava edição do usuário como synced e depois a sobrescreve); (LOW)
+   loopback OAuth aceita UMA conexão (preconnect especulativo do browser
+   pode travar o login); (LOW) `run_command` sem timeout (um `gio`
+   pendurado congela o pool); (LOW) asserts de boot hostis + socket path
+   >107 bytes derruba o daemon inteiro; (LOW) doctor não é 100% passivo
+   (refresh grava tokens.json; `state_db.open` cria tabela no DB vivo);
+   (LOW) cache do plugin Dolphin cresce sem eviction.
+7. (Decisão de produto) Nativo both-created sobrescreve arquivo local nunca
+   sincronizado sem conflicted-copy (deliberado e testado, mas a
+   justificativa cobre não-subir, não cobre não-preservar).

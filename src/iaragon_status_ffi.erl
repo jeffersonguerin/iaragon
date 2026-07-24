@@ -6,7 +6,13 @@
 -export([serve_status_lines/2]).
 
 serve_status_lines(SockPath, Answer) ->
-    PathString = binary_to_list(SockPath),
+    %% Keep the path as the UTF-8 BINARY Gleam handed us: both {local, _} and
+    %% the file module take binaries as-is. binary_to_list/1 would yield the
+    %% raw bytes as codepoints, which inet re-encodes to native — double
+    %% encoding, so under a non-ASCII $HOME the daemon would bind a mojibake
+    %% sibling path that the Dolphin plugin and the tray (which compute the
+    %% true UTF-8 path) can never find.
+    PathString = SockPath,
     %% A previous daemon that died without cleanup leaves the bound socket
     %% file behind; binding needs the path free.
     _ = file:delete(PathString),

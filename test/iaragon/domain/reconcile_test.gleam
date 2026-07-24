@@ -494,3 +494,44 @@ pub fn reconcile_all_covers_orphans_on_every_side_test() {
       UploadLocal("new.txt"),
     ]
 }
+
+pub fn a_native_link_is_never_inferred_as_a_renamed_file_test() {
+  // A native's local materialisation is a generated link with no md5 in the
+  // known index, so the content check that guards blob renames is vacuous.
+  // Renaming the link locally (mv preserves size+mtime) must NOT rename the
+  // Google Doc remotely — the .desktop extension would leak into the Drive
+  // name and the settle would rewrite the known kind. Only blobs are rename
+  // candidates.
+  let native_known =
+    KnownFile(
+      ..a_known(),
+      file_id: "id-doc",
+      path: "notes.desktop",
+      md5: None,
+      size: 120,
+      local_mtime_seconds: 1000,
+      kind: entry.GoogleNative,
+    )
+  let native_remote =
+    RemoteFile(
+      ..a_remote(),
+      file_id: "id-doc",
+      name: "notes",
+      path: "notes.desktop",
+      mime_type: "application/vnd.google-apps.document",
+      size: None,
+      md5: None,
+      kind: entry.GoogleNative,
+    )
+  // The link, renamed in the file manager: same size, same mtime.
+  let renamed_link =
+    LocalFile(path: "plan.desktop", size: 120, mtime_seconds: 1000, md5: None)
+
+  let decisions =
+    reconcile.reconcile_all([renamed_link], [native_remote], [native_known])
+
+  assert !list.contains(
+    decisions,
+    MoveRemote("id-doc", "notes.desktop", "plan.desktop"),
+  )
+}

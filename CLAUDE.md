@@ -128,11 +128,14 @@ Invariantes que NUNCA podem quebrar:
 ## Estado do projeto
 
 As 4 fases do roadmap (download-only → upload-only → bidirecional →
-overlays) estão ENTREGUES, com hardening (3 rodadas de pentest), válvulas
-de segurança de dados, doctor, instalador e benchmarks. **Backlog zerado**
-— trabalho novo = decisão de produto nova (candidatos conhecidos: shared
-drives, sync seletivo, backoff por-arquivo p/ `downloadRestrictedForRevision`).
-Histórico e residuais documentados em `docs/`.
+overlays) estão ENTREGUES, com hardening (3 rodadas de pentest + revisão
+profunda da sessão 24), válvulas de segurança de dados, doctor, instalador,
+release autocontido/pacotes, tray e benchmarks. **Backlog atual**: os
+residuais MED/LOW da revisão profunda (lista priorizada no fim de
+[docs/development-log.md](docs/development-log.md) — os top-4: eviction do
+status_board, corrida do DOWN do pool, cache created_folders, temp único no
+refresh de token). Decisões de produto candidatas: shared drives, sync
+seletivo, backoff por-arquivo p/ `downloadRestrictedForRevision`.
 
 ## Ambiente de dev/CI (containers Ubuntu 24.04)
 

@@ -82,3 +82,20 @@ fn list_count_prefixed(entries: List(String), prefix: String) -> Int {
 
 @external(erlang, "iaragon_touch_ffi", "set_mtime")
 fn set_mtime(path: String, mtime_unix: Int) -> Result(Nil, String)
+
+pub fn a_freshly_trashed_old_file_survives_the_sweep_test() {
+  // `rename` preserves mtime, so judging age by the file's own mtime would
+  // measure "when was the content last edited", not "when was it trashed" —
+  // an old file deleted today would be swept at the very next boot, with an
+  // effective recovery window of zero. Trashing must restart the clock.
+  let root = fresh_root("fresh-trash")
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/ancient.txt", contents: "x")
+  // Content last edited long before the retention window.
+  let assert Ok(Nil) = set_mtime(root <> "/ancient.txt", 1000)
+
+  let assert Ok(Nil) = local_trash.move_to_trash(root, "ancient.txt")
+  local_trash.sweep(root, now_unix: 4_000_000, retention_seconds: 1_000_000)
+
+  assert simplifile.is_file(root <> "/.iaragon-trash/ancient.txt") == Ok(True)
+}

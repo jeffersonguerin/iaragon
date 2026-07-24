@@ -23,7 +23,10 @@ query_status_line(SockPath, Line) ->
 
 connect_and_query(SockPath, Line) ->
     Options = [binary, {packet, line}, {packet_size, 4096}, {active, false}],
-    case gen_tcp:connect({local, binary_to_list(SockPath)}, 0, Options, 1000) of
+    %% The UTF-8 binary goes to {local, _} as-is — binary_to_list would
+    %% double-encode a non-ASCII path (the session-22 trap) and the doctor
+    %% would probe a mojibake sibling of the daemon's real socket.
+    case gen_tcp:connect({local, SockPath}, 0, Options, 1000) of
         {ok, Sock} ->
             Result =
                 case gen_tcp:send(Sock, [Line, "\n"]) of

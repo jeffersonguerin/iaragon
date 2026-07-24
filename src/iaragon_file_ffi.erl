@@ -1,8 +1,17 @@
 %% Thin FFI over Erlang's file module for chunked reads: resumable uploads
 %% send 256 KB-multiple pieces and must never hold a whole file in memory.
 %% Returns Gleam-shaped results matching iaragon/infrastructure/fs/chunked_read.
+%% Also hosts touch_now/1 (set mtime to the present), which simplifile does
+%% not expose — the local trash uses it to start the retention clock at
+%% trash time rather than at the content's last edit.
 -module(iaragon_file_ffi).
--export([open_read/1, read_chunk/2, close/1]).
+-export([open_read/1, read_chunk/2, close/1, touch_now/1]).
+
+touch_now(Path) ->
+    case file:change_time(path_chars(Path), calendar:local_time()) of
+        ok -> {ok, nil};
+        {error, Reason} -> {error, format_reason(Reason)}
+    end.
 
 open_read(Path) ->
     case file:open(path_chars(Path), [read, binary, raw]) of

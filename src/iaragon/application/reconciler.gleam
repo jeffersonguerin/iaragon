@@ -798,9 +798,16 @@ fn plan_remote_files(
       case classify_sighting(sighting) {
         None -> Error(Nil)
         Some(kind) ->
+          // The EFFECTIVE local leaf name — materialisation extension
+          // included — goes into path resolution, so disambiguation sees the
+          // name that will actually land on disk. Appending the extension
+          // after resolution let a Doc `notes` collide with a sibling blob
+          // literally named `notes.desktop`: two fileIds on one local path,
+          // which overwrite each other locally and then corrupt each other
+          // remotely (download-over, upload-back ping-pong).
           Ok(paths.RemoteNode(
             file_id: sighting.file_id,
-            name: sighting.name,
+            name: materialized_name(sighting, kind, policy),
             parent_id: sighting.parent_id,
             is_folder: kind == Folder,
           ))
@@ -814,7 +821,7 @@ fn plan_remote_files(
         Ok(RemoteFile(
           file_id: sighting.file_id,
           name: sighting.name,
-          path: materialized_path(path, kind, sighting, policy),
+          path: path,
           mime_type: sighting.mime_type,
           parent_id: sighting.parent_id,
           modified_time: sighting.modified_time,
@@ -848,10 +855,13 @@ fn changed_extension(from: String, to: String) -> Bool {
   from_extension != to_extension
 }
 
-fn materialized_path(
-  path: String,
-  kind: entry.FileKind,
+/// The leaf name a sighting will occupy on disk: the raw remote name for
+/// blobs and folders, the name plus the materialisation extension for
+/// natives and shortcuts. Computed BEFORE path resolution so disambiguation
+/// operates on the name that actually lands in the mirror.
+fn materialized_name(
   sighting: RemoteSighting,
+  kind: entry.FileKind,
   policy: NativeDocPolicy,
 ) -> String {
   case kind {
@@ -863,12 +873,12 @@ fn materialized_path(
           size: sighting.size,
         )
       {
-        native_docs.WriteLinkFile -> path <> ".desktop"
+        native_docs.WriteLinkFile -> sighting.name <> ".desktop"
         native_docs.ExportDocument(_export_mime, extension) ->
-          path <> "." <> extension
+          sighting.name <> "." <> extension
       }
-    entry.Shortcut(_) -> path <> ".desktop"
-    Folder | Blob -> path
+    entry.Shortcut(_) -> sighting.name <> ".desktop"
+    Folder | Blob -> sighting.name
   }
 }
 

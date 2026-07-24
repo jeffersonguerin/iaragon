@@ -1,3 +1,4 @@
+import iaragon/infrastructure/overlay/status_probe
 import iaragon/infrastructure/overlay/status_server
 import simplifile
 
@@ -110,4 +111,21 @@ pub fn a_trailing_slash_on_the_runtime_dir_is_not_doubled_test() {
 pub fn a_trailing_slash_on_the_data_dir_is_not_doubled_test() {
   assert status_server.resolve_socket_path(Error(Nil), "/data/")
     == "/data/status.sock"
+}
+
+pub fn an_accented_socket_path_binds_at_the_true_utf8_name_test() {
+  // binary_to_list on the path double-encodes non-ASCII (ç -> ÃƒÂ§ on disk):
+  // under an accented $HOME the daemon would bind a mojibake sibling that
+  // external clients (Dolphin plugin, tray), which compute the true UTF-8
+  // path, can never find — while the equally-mangled doctor still connects
+  // and masks the fault. Pin the ON-DISK name, then query via the doctor's
+  // production probe.
+  let dir = sock_dir <> "/ação"
+  let assert Ok(Nil) = simplifile.create_directory_all(dir)
+  let sock = dir <> "/statüs.sock"
+  let assert Ok(_) = status_server.start(sock, fn(_line) { "synced" })
+
+  let assert Ok(entries) = simplifile.read_directory(dir)
+  assert entries == ["statüs.sock"]
+  assert status_probe.query_status(sock, "/x") == Ok("synced")
 }

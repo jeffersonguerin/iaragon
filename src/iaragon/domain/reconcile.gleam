@@ -223,11 +223,14 @@ fn infer_renames_with(
 ) -> dict.Dict(String, String) {
   let vanished =
     list.filter(lasts, fn(k) {
-      // Folders are never rename candidates: the scan lists files only, so a
-      // synced folder ALWAYS looks locally vanished, and pairing it with a
-      // fresh file of matching (size, mtime) would rename the whole remote
-      // folder onto that file.
-      k.kind != entry.Folder
+      // Only BLOBS are rename candidates. Folders: the scan lists files
+      // only, so a synced folder always looks locally vanished, and pairing
+      // it with a fresh file of matching (size, mtime) would rename the
+      // whole remote folder onto that file. Natives/shortcuts: their local
+      // form is a generated link with no md5 in the index, so the content
+      // check below is vacuous — renaming the link would rename the Google
+      // Doc itself, leaking the .desktop extension into the Drive name.
+      k.kind == entry.Blob
       && !dict.has_key(local_by_path, k.path)
       && case dict.get(remote_by_id, k.file_id) {
         Ok(r) -> !r.trashed && r.path == k.path && !detect_remote_change(r, k)

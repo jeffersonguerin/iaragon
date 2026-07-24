@@ -6,7 +6,7 @@
 %% Abusive client: connect and abort (RST via linger 0) N times as fast as
 %% possible, to race the acceptor's controlling_process call. Returns nil.
 slam(SockPath, N) ->
-    slam_loop(binary_to_list(SockPath), N),
+    slam_loop(SockPath, N),
     nil.
 
 slam_loop(_Path, 0) ->
@@ -21,7 +21,7 @@ slam_loop(Path, N) ->
 
 query_lines(SockPath, Lines) ->
     Options = [binary, {packet, line}, {active, false}],
-    case gen_tcp:connect({local, binary_to_list(SockPath)}, 0, Options, 1000) of
+    case gen_tcp:connect({local, SockPath}, 0, Options, 1000) of
         {ok, Sock} ->
             Result = exchange(Sock, Lines, []),
             gen_tcp:close(Sock),
