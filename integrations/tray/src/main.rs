@@ -7,7 +7,7 @@
 //! socket does not answer, the daemon is not running and the tray shows an
 //! offline icon. No daemon coupling beyond that one line protocol.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -67,13 +67,12 @@ fn resolve_socket_path(runtime_dir: Option<String>, data_dir: &str) -> PathBuf {
     }
 }
 
-/// The iaragon data dir: $XDG_DATA_HOME/iaragon, else ~/.local/share/iaragon.
-fn data_dir(xdg_data_home: Option<String>, home: &str) -> String {
-    let base = match xdg_data_home {
-        Some(d) if !d.is_empty() => d,
-        _ => format!("{home}/.local/share"),
-    };
-    format!("{base}/iaragon")
+/// The iaragon data dir. The daemon hardcodes ~/.local/share/iaragon (it does
+/// NOT honor XDG_DATA_HOME — see iaragon.gleam), and the Dolphin plugin
+/// mirrors that; so must we, or the tray would watch a socket path the daemon
+/// never binds when XDG_DATA_HOME is set.
+fn data_dir(home: &str) -> String {
+    format!("{home}/.local/share/iaragon")
 }
 
 /// Ask the daemon for its aggregate status. Any I/O error (no socket file,
@@ -90,9 +89,12 @@ fn query_once(socket: &std::path::Path) -> std::io::Result<String> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     stream.write_all(b"?status\n")?;
-    let mut buf = String::new();
-    stream.read_to_string(&mut buf)?;
-    Ok(buf)
+    // One reply LINE, not read-to-EOF: the daemon keeps the connection open
+    // for further queries (it is a many-exchanges-per-connection protocol),
+    // so waiting for EOF would only ever end in the read timeout.
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    Ok(line)
 }
 
 // --- tray ------------------------------------------------------------------
@@ -161,10 +163,7 @@ fn env_nonempty(key: &str) -> Option<String> {
 
 fn main() {
     let home = env_nonempty("HOME").unwrap_or_else(|| ".".to_string());
-    let socket = resolve_socket_path(
-        env_nonempty("XDG_RUNTIME_DIR"),
-        &data_dir(env_nonempty("XDG_DATA_HOME"), &home),
-    );
+    let socket = resolve_socket_path(env_nonempty("XDG_RUNTIME_DIR"), &data_dir(&home));
     // The mirror the "Open folder" item points at; override with IARAGON_MIRROR.
     let mirror = env_nonempty("IARAGON_MIRROR").unwrap_or_else(|| format!("{home}/GoogleDrive"));
 
@@ -228,10 +227,10 @@ mod tests {
     }
 
     #[test]
-    fn data_dir_prefers_xdg_then_home() {
-        assert_eq!(data_dir(Some("/x/data".into()), "/home/u"), "/x/data/iaragon");
-        assert_eq!(data_dir(None, "/home/u"), "/home/u/.local/share/iaragon");
-        assert_eq!(data_dir(Some(String::new()), "/home/u"), "/home/u/.local/share/iaragon");
+    fn data_dir_mirrors_the_daemon_exactly() {
+        // The daemon hardcodes ~/.local/share/iaragon (no XDG_DATA_HOME); the
+        // tray must look exactly where the daemon binds.
+        assert_eq!(data_dir("/home/u"), "/home/u/.local/share/iaragon");
     }
 
     #[test]
@@ -240,5 +239,33 @@ mod tests {
             assert!(!s.icon_name().is_empty());
             assert!(!s.description().is_empty());
         }
+    }
+
+    #[test]
+    fn query_reads_one_line_without_waiting_for_eof() {
+        // The daemon's socket server answers and KEEPS the connection open
+        // for further queries. Reading to EOF would therefore always end in
+        // the read timeout — the query must return on the reply line itself.
+        use std::os::unix::net::UnixListener;
+        let dir = std::env::temp_dir().join(format!("iaragon-tray-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("status.sock");
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+        let _server = std::thread::spawn(move || {
+            let (mut client, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(client.try_clone().unwrap()).read_line(&mut line).unwrap();
+            assert_eq!(line, "?status\n");
+            client.write_all(b"syncing\n").unwrap();
+            // Hold the connection open, like the daemon does.
+            std::thread::sleep(Duration::from_secs(4));
+        });
+
+        let started = std::time::Instant::now();
+        let word = query_once(&sock).unwrap();
+        assert_eq!(Status::parse(&word), Status::Syncing);
+        // Well under the 2 s read timeout: we returned on the line, not on EOF.
+        assert!(started.elapsed() < Duration::from_millis(1900));
     }
 }

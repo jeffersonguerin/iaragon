@@ -13,17 +13,19 @@ Description=iaragon — system tray status indicator
 Documentation=https://github.com/jeffersonguerin/iaragon
 After=graphical-session.target
 PartOf=graphical-session.target
+# The tray may start before the tray host is ready (or find none yet); let it
+# come back rather than give up. This start-limit keeps that from becoming a
+# tight loop when no SNI host exists at all. It MUST live in [Unit]: in
+# [Service] systemd ignores the keys ("Unknown key name", verified with
+# systemd-analyze) and the guard silently does not exist.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/iaragon-tray
-# The tray may start before the tray host is ready (or find none yet); let it
-# come back rather than give up. A start-limit keeps that from becoming a
-# tight loop when no SNI host exists at all.
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 [Install]
 WantedBy=graphical-session.target

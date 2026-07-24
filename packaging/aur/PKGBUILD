@@ -15,7 +15,7 @@ pkgrel=1
 pkgdesc="Bidirectional Google Drive sync daemon (Mirror mode) for Linux"
 arch=('x86_64' 'aarch64')
 url="https://github.com/jeffersonguerin/iaragon"
-license=('Apache')
+license=('Apache-2.0')
 # erlang >= 29 at runtime (Arch tracks current OTP); gleam+rebar3+gcc to build
 # (rebar3 compiles the Erlang dep behind filespy, gcc the sqlight NIF).
 depends=('erlang>=29')

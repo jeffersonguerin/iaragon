@@ -111,7 +111,7 @@ cat > "$PKGDIR/DEBIAN/control" <<EOF
 Package: iaragon
 Version: $VERSION
 Architecture: $DEB_ARCH
-Maintainer: iaragon maintainers <noreply@github.com/jeffersonguerin/iaragon>
+Maintainer: Jefferson Guerin <jeffersonguerin@users.noreply.github.com>
 Installed-Size: $INSTALLED_KB
 Section: utils
 Priority: optional
