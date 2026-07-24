@@ -44,33 +44,46 @@ of them restarts that actor alone.
 
 ### curl (Linux)
 
-Builds from source and installs a per-user daemon under `~/.local`.
-
 ```sh
 curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install.sh | sh
 ```
 
-- **No conflicts with your toolchain**: any dependency already installed —
+By default this **downloads a prebuilt, self-contained release** and installs
+a per-user daemon under `~/.local` — **no build toolchain on your machine**.
+The bundle ships its own BEAM runtime, so there is no Erlang/Gleam/rebar3/gcc
+to install; it feels like downloading a program, not compiling one. It
+installs the `iaragon`, `iaragon-login` and `iaragon-doctor` launchers to
+`~/.local/bin`, plus a systemd **user** unit at
+`~/.config/systemd/user/iaragon.service`.
+
+If no prebuilt release exists for your architecture (or the download fails),
+the script transparently **falls back to building from source**. That
+fallback:
+
+- **Doesn't conflict with your toolchain**: any dependency already installed —
   by any means (apt, brew, kerl, asdf, a manual build) — is detected and
   kept. Nothing is reinstalled or duplicated; only what is missing gets
   installed.
-- **Consistent method**: missing dependencies come from the one package
+- **Uses a consistent method**: missing dependencies come from the one package
   manager detected on your system (apt → all from apt, and so on). A direct
   binary download is used only for a dependency your manager doesn't package
   (Gleam isn't in apt/dnf/zypper), and the script says so when it happens.
-- **Transparent**: it prints a plan of what's present and what it will
+- **Is transparent**: it prints a plan of what's present and what it will
   install before acting, echoes the exact command per package, and shows a
   summary at the end.
-- Erlang/OTP ≥ 29 is required at runtime; if your distro's Erlang is older,
-  the script stops with instructions rather than installing something that
-  would crash. The floor is the current OTP branch on purpose: older branches
-  either break outright or no longer receive httpc security fixes, and this
-  daemon holds a Google OAuth token.
+- Needs Erlang/OTP ≥ 29 at runtime; if your distro's Erlang is older, the
+  script stops with instructions rather than installing something that would
+  crash. The floor is the current OTP branch on purpose: older branches either
+  break outright or no longer receive httpc security fixes, and this daemon
+  holds a Google OAuth token. (The prebuilt release bundles a suitable OTP, so
+  this only applies to the source fallback.)
 
-Overridable by environment: `IARAGON_REF` (git ref, default `main`),
-`IARAGON_PREFIX` (default `~/.local`), `IARAGON_PM` (force the package
-manager for missing deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`,
-`REBAR3_VERSION` (pin the rebar3 download), `IARAGON_NO_SUDO=1`.
+Overridable by environment: `IARAGON_FROM_SOURCE=1` (skip the prebuilt release
+and build from source), `IARAGON_RELEASE_BASE` (where the prebuilt tarball is
+fetched from), `IARAGON_REF` (git ref, default `main`), `IARAGON_PREFIX`
+(default `~/.local`), `IARAGON_PM` (force the package manager for missing
+deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`, `REBAR3_VERSION` (pin the
+rebar3 download), `IARAGON_NO_SUDO=1`.
 
 It installs the `iaragon` (daemon) and `iaragon-login` launchers to
 `~/.local/bin`, plus a systemd **user** unit at

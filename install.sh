@@ -23,7 +23,18 @@
 # what is present and what it will install (and how); it echoes the exact
 # command it runs for each package; and it prints a summary at the end.
 #
+# By default this DOWNLOADS a prebuilt, self-contained release (the whole
+# BEAM runtime + the app in one relocatable bundle) and installs it with NO
+# build toolchain on your machine — it feels like downloading a program, not
+# compiling one. If no prebuilt exists for your arch, or the download fails,
+# it transparently falls back to building from source (the rest of this
+# header describes that fallback).
+#
 # Overridable by environment:
+#   IARAGON_FROM_SOURCE  set to 1 to skip the prebuilt release and build from
+#                        source (the toolchain-installing path below)
+#   IARAGON_RELEASE_BASE base URL the prebuilt tarball is fetched from
+#                        (default: the GitHub 'latest' release assets)
 #   IARAGON_REF     git ref to build (default: main)
 #   IARAGON_REPO    clone URL (default: the GitHub repo)
 #   IARAGON_PREFIX  install prefix (default: ~/.local)
@@ -40,11 +51,13 @@
 # get a newer one rather than installing something that would crash on first
 # use.
 #
-# Trust model: packages come from your package manager (its own signing).
-# The two direct downloads (the Gleam binary, the rebar3 escript) come over
-# HTTPS from the projects' official GitHub release URLs; transport authenticity
-# is TLS, and there is no additional pinned-checksum verification. If you need
-# that, install Gleam/rebar3 yourself first (they will be detected and kept).
+# Trust model: the prebuilt release tarball, and (in the source fallback) the
+# Gleam binary and rebar3 escript, come over HTTPS from official GitHub
+# release URLs — transport authenticity is TLS, with no additional
+# pinned-checksum verification. Distro packages come from your package manager
+# (its own signing). If you need checksum pinning, build from source
+# (IARAGON_FROM_SOURCE=1) and/or install Gleam/rebar3 yourself first (they are
+# detected and kept).
 #
 # All the imperative work lives in main(), invoked on the very last line, so a
 # truncated `curl | sh` download never executes a partial script.
@@ -387,8 +400,8 @@ plan_row() { # generic label present?
   fi
 }
 
-# --- go ---------------------------------------------------------------------
-main() {
+# --- build from source (fallback path) -------------------------------------
+install_from_source() {
 detect_pm
 if [ "$PM" = "none" ]; then
   warn "no supported package manager detected (apt/dnf/pacman/zypper/apk/brew) — build tools must already be present"
@@ -499,7 +512,12 @@ exec erl -pa "$LIBDIR"/*/ebin -noshell -eval 'iaragon@doctor:main(), halt(0)' -e
 EOF
 chmod +x "$BINDIR/iaragon-doctor"
 
-# --- systemd user unit ------------------------------------------------------
+  install_systemd_units
+  print_next_steps
+}
+
+# --- systemd user units (shared by both install paths) ---------------------
+install_systemd_units() {
 if have systemctl; then
   log "installing systemd user unit to $UNITDIR/iaragon.service"
   mkdir -p "$UNITDIR"
@@ -552,8 +570,10 @@ EOF
 else
   warn "systemctl not found — skipping systemd unit (start the daemon with 'iaragon')"
 fi
+}
 
-# --- done -------------------------------------------------------------------
+# --- closing instructions (shared by both install paths) -------------------
+print_next_steps() {
 cat <<EOF
 
 $(printf '%b==>%b' "$C_INFO" "$C_OFF") iaragon installed.
@@ -576,6 +596,90 @@ Next steps:
 
 Your mirror will live at ~/GoogleDrive.
 EOF
+}
+
+# --- prebuilt release (default path — no build toolchain needed) -----------
+# Map the machine to the release asset arch, or empty if we ship no prebuilt
+# for it (then the source build takes over).
+release_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64)  echo x86_64 ;;
+    aarch64|arm64) echo aarch64 ;;
+    *)             echo "" ;;
+  esac
+}
+
+# Download and install the self-contained, relocatable release. Returns 0 on
+# success; returns non-zero (without aborting the script) to fall back to the
+# source build for any reason — no curl/tar, an arch we do not ship, a
+# download/unpack failure, or a bundle missing its launcher.
+install_prebuilt() {
+  have curl || { note "curl not found — building from source"; return 1; }
+  have tar  || { note "tar not found — building from source"; return 1; }
+  arch="$(release_arch)"
+  [ -n "$arch" ] || { note "no prebuilt release for $(uname -m) — building from source"; return 1; }
+
+  base="${IARAGON_RELEASE_BASE:-https://github.com/jeffersonguerin/iaragon/releases/latest/download}"
+  asset="iaragon-linux-$arch.tar.gz"
+  url="$base/$asset"
+
+  log "fetching the prebuilt self-contained release ($arch)"
+  printf '%b    $ curl -fsSL %s%b\n' "$C_DIM" "$url" "$C_OFF"
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  if ! curl -fsSL "$url" -o "$tmp/$asset"; then
+    note "no prebuilt release available (download failed) — building from source"
+    rm -rf "$tmp"; trap - EXIT; return 1
+  fi
+  log "unpacking"
+  if ! tar xzf "$tmp/$asset" -C "$tmp"; then
+    warn "prebuilt release did not unpack — building from source"
+    rm -rf "$tmp"; trap - EXIT; return 1
+  fi
+  # The tarball extracts to a single iaragon-<os>-<arch>/ dir (otp/ app/ bin/).
+  reldir=""
+  for d in "$tmp"/iaragon-*/; do [ -d "$d" ] && { reldir="${d%/}"; break; }; done
+  if [ -z "$reldir" ] || [ ! -x "$reldir/bin/iaragon" ]; then
+    warn "prebuilt release has no runnable bin/iaragon — building from source"
+    rm -rf "$tmp"; trap - EXIT; return 1
+  fi
+
+  log "installing to $LIBDIR"
+  rm -rf "$LIBDIR"
+  mkdir -p "$(dirname "$LIBDIR")"
+  cp -a "$reldir" "$LIBDIR"        # LIBDIR now holds otp/ app/ bin/
+  rm -rf "$tmp"; trap - EXIT
+
+  log "installing launchers to $BINDIR"
+  # Thin wrappers over the bundle's own launchers, which locate their bundled
+  # OTP relative to themselves — no system Erlang, no PATH surgery.
+  for name in iaragon iaragon-login iaragon-doctor; do
+    cat > "$BINDIR/$name" <<EOF
+#!/bin/sh
+# iaragon launcher (generated by install.sh, prebuilt bundle) — self-contained.
+exec "$LIBDIR/bin/$name" "\$@"
+EOF
+    chmod +x "$BINDIR/$name"
+  done
+
+  add_newly "iaragon(prebuilt $arch -> $LIBDIR)"
+  install_systemd_units
+  print_next_steps
+  return 0
+}
+
+# --- go ---------------------------------------------------------------------
+main() {
+  mkdir -p "$BINDIR"
+  case ":$PATH:" in *":$BINDIR:"*) : ;; *) PATH="$BINDIR:$PATH"; export PATH ;; esac
+  if [ "${IARAGON_FROM_SOURCE:-0}" != 1 ]; then
+    log "installing the prebuilt self-contained release (no build toolchain needed)"
+    install_prebuilt && return 0
+    note "falling back to building from source"
+  else
+    note "IARAGON_FROM_SOURCE=1 — building from source (skipping the prebuilt release)"
+  fi
+  install_from_source
 }
 
 main "$@"

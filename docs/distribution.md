@@ -55,7 +55,18 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
 `oauth_client.json`), o que dá um smoke test barato.
 
 - **`install.sh`** (`curl -sSL …/install.sh | sh`): POSIX sh, daemon
-  **por-usuário** sob `~/.local`. Princípios decididos:
+  **por-usuário** sob `~/.local`. **Dois modos:**
+  - **Prebuilt (padrão)**: baixa o tarball autocontido (`releases/latest/
+    download/iaragon-linux-<arch>.tar.gz`), extrai em `$LIBDIR` (que passa a
+    conter `otp/ app/ bin/`) e instala launchers finos em `$BINDIR` que só
+    `exec` o launcher do bundle — **zero toolchain no alvo**. É o que dá a
+    sensação de "baixei um programa". `release_arch` mapeia x86_64/aarch64;
+    arch não suportada, download ou unpack falho → cai no source. Knobs:
+    `IARAGON_FROM_SOURCE=1` (pula o prebuilt), `IARAGON_RELEASE_BASE` (base
+    URL — aceita `file://` p/ teste/self-host). Validado e2e servindo o
+    tarball por `file://` num host com só OTP 25 no sistema: o launcher
+    instalado sobe o OTP 29 do bundle.
+  - **Source (fallback)**: compila do fonte. Princípios decididos:
   - **Não conflita com o toolchain existente**: cada dependência já presente
     (por QUALQUER meio — apt, brew, kerl, asdf, build manual) é detectada e
     MANTIDA; nada é reinstalado nem duplicado. Só o que falta é instalado. A
