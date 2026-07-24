@@ -42,9 +42,14 @@ set -eu
 # a wheel's limit carries into the next one (0.5.9 +patch -> 0.6.0;
 # 0.99.9 +patch -> 1.0.0; 1.99.3 +minor -> 2.0.0). The major NEVER moves on
 # its own — only by carry: in a rolling release the version is a mileage
-# counter, not a compatibility promise. Which wheel turns is mechanical:
-# a push that changes src/ (daemon behavior) is a MINOR bump; anything else
-# (docs, tests, scripts, packaging, hooks) is a PATCH.
+# counter, not a compatibility promise. Which wheel turns is mechanical,
+# and ONLY CODE turns a wheel: a push that changes src/ (daemon behavior)
+# is a MINOR bump; other code (tests, integrations, Formula, scripts,
+# hooks, dependency manifests) is a PATCH; a push of documentation alone
+# (docs/, *.md, LICENSE, NOTICE, .claude/, .gitignore) mints NO version —
+# a doc never changes the product, so it never moves the odometer. The
+# `latest` channel tag still follows every push: it names the tip, not a
+# version.
 next_version() {
   version="$1"
   kind="$2"
@@ -161,6 +166,42 @@ EOF
   [ "$had_line" = 1 ] || echo yes
 }
 
+# Does any commit in this push change a file OUTSIDE $1 (an ERE)? Echoes
+# "yes" when so, or when the range cannot be resolved (fail safe toward
+# versioning — a spurious patch tag is cheaper than a silently missing one).
+# Same here-doc discipline as push_touches.
+push_changes_beyond() {
+  pattern="$1"
+  had_line=0
+  while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ -n "${local_sha:-}" ] || continue
+    case "$local_sha" in *[!0]*) : ;; *) continue ;; esac
+    had_line=1
+    case "$remote_sha" in
+      *[!0]*) range="$remote_sha..$local_sha" ;;
+      *)
+        if base="$(git merge-base "$local_sha" origin/main 2>/dev/null)"; then
+          range="$base..$local_sha"
+        else
+          echo yes; return
+        fi ;;
+    esac
+    if ! changed="$(git diff --name-only "$range" 2>/dev/null)"; then
+      echo yes; return
+    fi
+    if printf '%s\n' "$changed" | grep -Evq "$pattern"; then
+      echo yes; return
+    fi
+  done <<EOF
+$STDIN
+EOF
+  [ "$had_line" = 1 ] || echo yes
+}
+
+# What does NOT version: pure documentation and agent config. Everything
+# else in the tree is code of some kind (product, tests, packaging, CI).
+DOCS_ONLY_PATTERN='^(docs/|\.claude/|LICENSE$|NOTICE$|\.gitignore$)|\.md$'
+
 if [ -n "$(push_touches '^(src/|gleam\.toml$|manifest\.toml$|scripts/build-release\.sh$)')" ]; then
   echo "pre-push: release inputs changed — building the self-contained release"
   out="$(mktemp -d)"
@@ -237,19 +278,28 @@ if [ -n "$main_sha" ]; then
     if [ -z "$current" ]; then
       next="1.0.0"
       kind="first"
-    else
+    elif [ -n "$(push_touches '^src/')" ]; then
       # push_touches errs toward "yes" when a range cannot be resolved —
       # here that caution lands on minor, the larger wheel: acceptable.
-      if [ -n "$(push_touches '^src/')" ]; then kind="minor"; else kind="patch"; fi
+      kind="minor"
       next="$(next_version "$current" "$kind")"
-    fi
-    git tag -a "v$next" -m "iaragon $next ($kind bump, automated by pre-push)" "$main_sha"
-    if git push --no-verify --quiet origin "refs/tags/v$next"; then
-      echo "pre-push: versioned as v$next ($kind)"
+    elif [ -n "$(push_changes_beyond "$DOCS_ONLY_PATTERN")" ]; then
+      kind="patch"
+      next="$(next_version "$current" "$kind")"
     else
-      # The tag exists locally either way; a later push carries it. Never
-      # fail the branch push over version bookkeeping.
-      echo "pre-push: warning: could not push tag v$next (kept locally)" >&2
+      kind=""
+      next=""
+      echo "pre-push: documentation-only push — the odometer does not move"
+    fi
+    if [ -n "$next" ]; then
+      git tag -a "v$next" -m "iaragon $next ($kind bump, automated by pre-push)" "$main_sha"
+      if git push --no-verify --quiet origin "refs/tags/v$next"; then
+        echo "pre-push: versioned as v$next ($kind)"
+      else
+        # The tag exists locally either way; a later push carries it. Never
+        # fail the branch push over version bookkeeping.
+        echo "pre-push: warning: could not push tag v$next (kept locally)" >&2
+      fi
     fi
   fi
 
