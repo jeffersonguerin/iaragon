@@ -128,10 +128,26 @@ o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
   mantenedor roda isto num host de build (um por arch) e sobe o tarball
   autocontido para um único release rolling GitHub taggeado `latest` (ponteiro
   de distribuição, NÃO tag de versão) via `gh`. O `install.sh` consome
-  `releases/latest/download/…`. **Auto-update de `.deb`/`.rpm`** exige um
-  **repo apt/yum assinado** hospedado por você (infra deliberada, fora do
-  escopo do repo) — sem ele, os pacotes instalam/atualizam à mão e o curl do
-  `install.sh` já entrega o release rolling.
+  `releases/latest/download/…`.
+- **Repo apt assinado** (`scripts/publish-apt.sh`, sessão 25): auto-update de
+  `.deb` via `apt upgrade` EXISTE — repositório dedicado
+  `github.com/<owner>/iaragon-apt` servido por raw.githubusercontent.com
+  (o `Filename:` do apt é relativo à raiz do archive, então GitHub Releases
+  não serve; Pages é opcional/cosmético). Repo SEPARADO de propósito: cada
+  publish commita um `.deb` de ~65 MB e git nunca esquece — no repo de código
+  isso incharia todo clone para sempre; no dedicado o peso fica em quarentena
+  e a história pode ser squashada sem tocar no código (clientes apt leem só a
+  ponta). Assinatura ed25519 com chave dedicada (GNUPGHOME próprio, fora de
+  qualquer repo; pública versionada como `iaragon-archive-keyring.gpg` na
+  raiz do iaragon-apt junto com o snippet deb822 de instalação). O script
+  builda o `.deb`, poda o pool (`IARAGON_APT_KEEP`, default 2 — limite rígido
+  do GitHub é 100 MB/arquivo, o bundle tem ~65), regenera
+  Packages/Release, assina (InRelease + Release.gpg, SHA512) e pusha.
+  Validado e2e nesta máquina: `apt update` reconhece a assinatura,
+  `apt install iaragon` baixa 67 MB do repo remoto, serviço volta, doctor
+  verde. Cache do raw: ~5 min entre o push e os clientes verem.
+  **Auto-update de `.rpm`** segue exigindo repo yum assinado (mesma receita,
+  `createrepo_c`, não montado).
 - Fato verificado: `gleam export erlang-shipment` produz um release
   autocontido; `entrypoint.sh run` execa `erl -pa "$BASE"/*/ebin -eval
   "iaragon@@main:run(iaragon)" -noshell`. E2e validado clonando `main`,

@@ -55,12 +55,16 @@ rolling GitHub release tagged `latest` (a distribution pointer, not a version
 tag). Run it once per architecture you ship, on a build host, with `gh`
 authenticated.
 
-For **`.deb`/`.rpm` auto-updates through the system updater** — the highest
-ongoing-friction win — the packages must live behind a **signed apt/yum
-repository** you host (e.g. GitHub Pages + `apt-ftparchive`/`createrepo_c` and
-a GPG signing key). That hosting is deliberate infrastructure, not something
-this repo automates: point the repo's `deb`/`rpm` lines at your server, sign
-the metadata, and `apt upgrade`/`dnf upgrade` carry new versions from then on.
-Until that repo exists, the packages install and update by hand
-(`apt install ./iaragon_*.deb`), and `install.sh`'s curl path already gives
-everyone the rolling self-contained release.
+For **`.deb` auto-updates through the system updater** — the highest
+ongoing-friction win — the packages live behind the **signed apt repository**
+published by [`scripts/publish-apt.sh`](../scripts/publish-apt.sh): a
+dedicated `iaragon-apt` git repository served via raw.githubusercontent.com,
+with ed25519-signed metadata (`InRelease`/`Release.gpg`). The install snippet
+(keyring + deb822 source) lives in that repository's README; from then on
+`apt update && apt upgrade` carries new versions like any other package.
+Publishing a new build is one command: `scripts/publish-apt.sh`.
+
+`.rpm` auto-updates still require a signed yum repository (same recipe with
+`createrepo_c`) — not set up. Without it, the `.rpm` installs and updates by
+hand, and `install.sh`'s curl path already gives everyone the rolling
+self-contained release.
