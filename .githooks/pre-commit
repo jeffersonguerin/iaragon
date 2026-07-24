@@ -6,7 +6,7 @@ set -eu
 
 if ! command -v gleam >/dev/null 2>&1; then
   echo "pre-commit: 'gleam' not found in PATH." >&2
-  echo "pre-commit: this project needs Gleam + Erlang/OTP >= 26 (see README)." >&2
+  echo "pre-commit: this project needs Gleam + Erlang/OTP >= 29 (see README)." >&2
   exit 1
 fi
 
