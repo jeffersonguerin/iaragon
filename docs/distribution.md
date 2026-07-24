@@ -114,6 +114,20 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
   não duplicadas. `test do` roda o login launcher.
 - **`dist/iaragon.service`**: template versionado da unit (usa `%h` p/ o
   prefixo padrão; o instalador reescreve o `ExecStart` p/ prefixo custom).
+- **Pacotes nativos** (`packaging/`, detalhes em
+  [packaging/README.md](../packaging/README.md)): `.deb` (bundle autocontido,
+  **construído+`dpkg -i`/run/remove validado** aqui), `.rpm` (`spec`, bundle,
+  validar no host RPM), `PKGBUILD` AUR (**build-from-source** dependendo do
+  `erlang` da distro — idiomático no rolling e ainda herda updates de OTP via
+  pacman). Versão derivada do git (`0.0.<n>+g<sha>`, rolling sem tags).
+- **Publicação** (`scripts/publish-release.sh`): sem CI remoto (decisão), o
+  mantenedor roda isto num host de build (um por arch) e sobe o tarball
+  autocontido para um único release rolling GitHub taggeado `latest` (ponteiro
+  de distribuição, NÃO tag de versão) via `gh`. O `install.sh` consome
+  `releases/latest/download/…`. **Auto-update de `.deb`/`.rpm`** exige um
+  **repo apt/yum assinado** hospedado por você (infra deliberada, fora do
+  escopo do repo) — sem ele, os pacotes instalam/atualizam à mão e o curl do
+  `install.sh` já entrega o release rolling.
 - Fato verificado: `gleam export erlang-shipment` produz um release
   autocontido; `entrypoint.sh run` execa `erl -pa "$BASE"/*/ebin -eval
   "iaragon@@main:run(iaragon)" -noshell`. E2e validado clonando `main`,
