@@ -94,10 +94,16 @@ zero-work), not brittle micro-timings.
 
 ## Releases and history
 
-Rolling release: no version tags, no changelog. `main` is always green
-and installable. The project log lives in [docs/](docs/), split by type —
-when your change touches an area, update the matching file
-(development log, security log, API facts, performance, data safety).
+Rolling release, odometer-versioned: every push that updates `main` is
+tagged `vX.Y.Z` automatically by the `pre-push` hook. The wheels: patch
+counts 0-9, minor 0-99, and a bump past a wheel's limit carries into the
+next one (`0.99.9` +patch → `1.0.0`); the major only ever moves by carry —
+the version is a mileage counter, not a compatibility promise. Which wheel
+turns is mechanical: a push changing `src/` is a minor bump, anything else
+is a patch. No changelog; `main` is always green and installable. The
+project log lives in [docs/](docs/), split by type — when your change
+touches an area, update the matching file (development log, security log,
+API facts, performance, data safety).
 
 ## Pull requests
 

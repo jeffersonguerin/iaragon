@@ -24,13 +24,18 @@ de arquivos.
   construtores `UploadLocal`, `ForgetKnown`). Exceção única e documentada:
   `pub fn supervised()` nos módulos de ator, nome canônico do padrão
   gleam_otp 1.2 (`supervision.ChildSpecification`).
-- **Rolling release com tag estável** (decisão da sessão 26): `main` segue
-  rolling e sem changelog, mas existe a tag `v1.0.0` — ela alimenta o
-  `stable` block da Formula (tarball com sha256 pinado). Nova tag estável =
-  decisão deliberada, não rotina. **Brew é o canal primário de
-  distribuição**; o curl/install.sh fica como compatibilidade (release
-  autocontido rolling, sem assinatura, confiança = TLS); apt/deb/rpm/AUR
-  foram aposentados — "uma coisa bem feita em vez de várias mais-ou-menos".
+- **Rolling release com versionamento odômetro automático** (sessões 26-28):
+  `main` segue rolling e sem changelog, e o `pre-push` versiona CADA push
+  que atualiza main com a próxima tag `vX.Y.Z` — rodas: patch 0-9,
+  minor 0-99, carry ao estourar (0.99.9 +patch → 1.0.0); o major NUNCA
+  anda sozinho, só por carry. Critério mecânico: push que muda `src/` =
+  minor; resto (docs/testes/scripts/packaging) = patch. Autoteste:
+  `.githooks/pre-push --next-version 0.99.9 patch`. O `stable` da Formula
+  continua pinado deliberadamente (atualizar o pin = decisão, não rotina).
+  **Brew é o canal primário de distribuição**; o curl/install.sh fica como
+  compatibilidade (release autocontido rolling, sem assinatura, confiança =
+  TLS); apt/deb/rpm/AUR foram aposentados — "uma coisa bem feita em vez de
+  várias mais-ou-menos".
 - Planejar antes de codar; explicitar suposições e trade-offs; separar fato de
   especulação; **não inventar APIs/endpoints** — verificar na doc oficial e dizer
   quando não houver certeza. Avisar de erros/riscos ANTES de propagarem.

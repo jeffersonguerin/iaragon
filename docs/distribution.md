@@ -158,3 +158,20 @@ o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
   autocontido; `entrypoint.sh run` execa `erl -pa "$BASE"/*/ebin -eval
   "iaragon@@main:run(iaragon)" -noshell`. E2e validado clonando `main`,
   compilando e rodando ambos launchers.
+
+## Versionamento odômetro automático (sessão 28)
+
+O `pre-push` versiona cada push que atualiza `main`: computa a próxima
+`vX.Y.Z` a partir da maior tag existente, cria a tag anotada no commit
+pushado e a envia junto (`--no-verify` — o conteúdo acabou de passar pelos
+gates; push só-de-tags não re-executa os gates, guarda de recursão).
+Rodas: **patch 0-9, minor 0-99**, carry ao estourar — `0.5.9`+patch→`0.6.0`,
+`0.99.9`+patch→`1.0.0`, `1.99.x`+minor→`2.0.0`; o **major nunca anda
+sozinho**, só por carry (num rolling a versão é hodômetro, não promessa de
+compatibilidade). Critério mecânico de roda: push que muda `src/` = minor
+(comportamento do daemon); resto = patch. Idempotente (commit já taggeado
+não ganha outra) e nunca falha o push por contabilidade de versão (tag que
+não subiu fica local com aviso). Aritmética autotestável sem push:
+`.githooks/pre-push --next-version 1.99.9 patch` → `2.0.0` (validado com
+tabela de 8 casos, carry duplo incluído). O `stable` da Formula NÃO segue as
+tags automaticamente — atualizar o pin (url+sha256) segue decisão deliberada.

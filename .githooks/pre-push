@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local CI, push gate. Four checks, cheapest first:
+# Local CI, push gate. Four checks (cheapest first) and a version step:
 #
 #  1. Warnings gate (always). Nothing leaves the machine with compiler
 #     warnings. The compiler is the linter in Gleam (there is no external
@@ -29,10 +29,59 @@
 #     crate (integrations/tray/), run its tests. Skipped with a warning when
 #     cargo is absent — Rust is an optional component toolchain.
 #
+#  5. Version bump (only for a main update, after every gate passed). Each
+#     push that updates main gets the next odometer version tag — see
+#     next_version() for the wheel rules and the patch-vs-minor criterion.
+#
 # Living here (not in pre-commit) keeps the commit cycle cheap; the
 # pre-commit hook still guards formatting and the suite.
 # Bypass for emergencies: git push --no-verify.
 set -eu
+
+# Odometer versioning. The wheels: patch counts 0-9, minor 0-99; a bump past
+# a wheel's limit carries into the next one (0.5.9 +patch -> 0.6.0;
+# 0.99.9 +patch -> 1.0.0; 1.99.3 +minor -> 2.0.0). The major NEVER moves on
+# its own — only by carry: in a rolling release the version is a mileage
+# counter, not a compatibility promise. Which wheel turns is mechanical:
+# a push that changes src/ (daemon behavior) is a MINOR bump; anything else
+# (docs, tests, scripts, packaging, hooks) is a PATCH.
+next_version() {
+  version="$1"
+  kind="$2"
+  major="${version%%.*}"
+  rest="${version#*.}"
+  minor="${rest%%.*}"
+  patch="${rest#*.}"
+  case "$kind" in
+    patch)
+      patch=$((patch + 1))
+      if [ "$patch" -gt 9 ]; then
+        patch=0
+        minor=$((minor + 1))
+      fi
+      ;;
+    minor)
+      minor=$((minor + 1))
+      patch=0
+      ;;
+    *)
+      echo "next_version: unknown bump kind '$kind'" >&2
+      return 1
+      ;;
+  esac
+  if [ "$minor" -gt 99 ]; then
+    minor=0
+    major=$((major + 1))
+  fi
+  echo "$major.$minor.$patch"
+}
+
+# Self-test mode so the wheel arithmetic is checkable without a push:
+#   .githooks/pre-push --next-version 0.99.9 patch   ->  1.0.0
+if [ "${1:-}" = "--next-version" ]; then
+  next_version "$2" "$3"
+  exit $?
+fi
 
 if ! command -v gleam >/dev/null 2>&1; then
   echo "pre-push: 'gleam' not found in PATH." >&2
@@ -68,6 +117,13 @@ fi
 # (new branch with no known base, unreadable input), fail SAFE toward running
 # the check rather than skipping it.
 STDIN="$(cat)"
+
+# A push carrying only tags (notably the version tag step 5 itself pushes)
+# must not re-run the content gates: they already ran for the commits those
+# tags point at. Branch updates are what the gates guard.
+if ! printf '%s\n' "$STDIN" | grep -q 'refs/heads/'; then
+  exit 0
+fi
 
 # Does any commit in this push touch a path matching $1 (an ERE)? Echoes
 # "yes" when so, or when the range can't be resolved (fail safe toward
@@ -146,5 +202,48 @@ if [ -n "$(push_touches '^integrations/tray/')" ]; then
     fi
   else
     echo "pre-push: cargo not found — skipping the tray tests (install Rust to gate them)." >&2
+  fi
+fi
+
+# --- 5. version bump (only for a main update, after every gate passed) ------
+# The pushed main commit gets the next odometer tag, pushed alongside with
+# --no-verify (its content just passed the gates above; re-entering the hook
+# for the tag would be circular). Idempotent: a re-push of an already-tagged
+# commit mints nothing. Known edge, accepted: if the branch push is rejected
+# after the hook (e.g. non-fast-forward), the tag has already landed and
+# points at a commit not yet on main — harmless, and the next successful
+# push continues from the highest tag either way.
+main_sha=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  case "$local_sha" in *[!0]*) main_sha="$local_sha" ;; *) : ;; esac
+done <<STDIN_EOF
+$STDIN
+STDIN_EOF
+
+if [ -n "$main_sha" ]; then
+  already="$(git tag --points-at "$main_sha" --list 'v[0-9]*' | head -1)"
+  if [ -n "$already" ]; then
+    echo "pre-push: $already already versions this commit"
+  else
+    current="$(git tag --list 'v[0-9]*' | sed 's/^v//' \
+      | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+    if [ -z "$current" ]; then
+      next="1.0.0"
+      kind="first"
+    else
+      # push_touches errs toward "yes" when a range cannot be resolved —
+      # here that caution lands on minor, the larger wheel: acceptable.
+      if [ -n "$(push_touches '^src/')" ]; then kind="minor"; else kind="patch"; fi
+      next="$(next_version "$current" "$kind")"
+    fi
+    git tag -a "v$next" -m "iaragon $next ($kind bump, automated by pre-push)" "$main_sha"
+    if git push --no-verify --quiet origin "refs/tags/v$next"; then
+      echo "pre-push: versioned as v$next ($kind)"
+    else
+      # The tag exists locally either way; a later push carries it. Never
+      # fail the branch push over version bookkeeping.
+      echo "pre-push: warning: could not push tag v$next (kept locally)" >&2
+    fi
   fi
 fi
