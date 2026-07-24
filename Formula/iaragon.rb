@@ -57,6 +57,14 @@ class Iaragon < Formula
       # iaragon health check launcher
       exec "#{erl}" -pa "#{libexec}"/*/ebin -noshell -eval 'iaragon@doctor:main(), halt(0)' -extra "$@"
     SH
+
+    # Pathname#write creates files 0644; a launcher that is not executable
+    # fails every invocation with "Permission denied" (observed on
+    # Homebrew 6 / Linux). Verified: write alone does NOT preserve or add
+    # the execute bit.
+    [bin/"iaragon", bin/"iaragon-login", bin/"iaragon-doctor"].each do |launcher|
+      launcher.chmod 0755
+    end
   end
 
   def caveats
