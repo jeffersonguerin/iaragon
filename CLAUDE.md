@@ -28,6 +28,12 @@ de arquivos.
 - Planejar antes de codar; explicitar suposições e trade-offs; separar fato de
   especulação; **não inventar APIs/endpoints** — verificar na doc oficial e dizer
   quando não houver certeza. Avisar de erros/riscos ANTES de propagarem.
+- **Regras comportamentais em `.claude/rules/`** (uma diretiva por arquivo, com
+  gatilho e escopo): TDD red-antes-de-green, nunca afirmar "passou" sem rodar,
+  verificar no código e não de memória, testar as costuras que não rodam aqui,
+  conteúdo do usuário vai pra lixeira (nunca unlink), commit por concern com
+  suíte verde, sem eval no `-m`, aprovação por-ação p/ irreversível/externo. Este
+  CLAUDE.md tem os FATOS do projeto; as rules têm o COMPORTAMENTO — ler ambos.
 
 ## Stack (decidida — não propor alternativa sem pedido explícito)
 
