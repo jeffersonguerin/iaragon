@@ -30,9 +30,11 @@ out of a sync daemon. Read this once and everything else follows.
   This points git at the versioned hooks — the project's local CI:
   - `pre-commit`: refuses unformatted code (`gleam format --check`) and a
     red suite (`gleam test`). **Every commit is green**, mechanically.
-  - `pre-push`: refuses compiler warnings
-    (`gleam build --warnings-as-errors`). In Gleam the compiler is the
-    linter; nothing leaves with warnings.
+  - `pre-push`: refuses compiler warnings — `gleam build
+    --warnings-as-errors` for Gleam code, plus a direct
+    `erlc +warnings_as_errors` pass over the project's own `.erl` FFI
+    sources (the Gleam flag does not promote Erlang-side warnings). In
+    Gleam the compiler is the linter; nothing leaves with warnings.
 
 ## How changes are made
 

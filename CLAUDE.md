@@ -191,7 +191,16 @@ candidatas: shared drives, sync seletivo, backoff por-arquivo p/
   (sessão 21) recusa push com `gleam build --warnings-as-errors` sujo —
   em Gleam o compilador É o linter (não existe linter externo; format é
   só formatação), e warnings re-emitem até para módulo em cache (validado
-  empiricamente), então nada sobe com warning. No pre-push e não no
+  empiricamente), então nada sobe com warning. **Buraco fechado na sessão
+  24**: `--warnings-as-errors` só promove warnings GLEAM — warning do
+  compilador Erlang num FFI imprime e o build sai 0 (validado no OTP 29
+  com o catch deprecado). O pre-push agora recompila os `.erl` PRÓPRIOS
+  (src/ e test/) com `erlc +warnings_as_errors`, que recusa. Escopo: só os
+  nossos — warning de dependência é do upstream (instância conhecida: o
+  `catch port_close` do fs_server.erl, corrigido no master do synrc/fs em
+  2026-06, SEM release Hex; pinar `fs` por git NÃO funciona — dep git do
+  Gleam exige gleam.toml no repo da dep, e fs é pacote rebar3 puro,
+  validado empiricamente na 1.17). No pre-push e não no
   pre-commit por decisão do usuário: ciclo de commit barato, gate na
   saída. Bypass de emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
   do shell chamador); commits via ferramenta precisam do

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local CI, push gate. Two checks, cheapest first:
+# Local CI, push gate. Four checks, cheapest first:
 #
 #  1. Warnings gate (always). Nothing leaves the machine with compiler
 #     warnings. The compiler is the linter in Gleam (there is no external
@@ -7,7 +7,17 @@
 #     warnings — and they re-emit even for cached modules, so a warning
 #     cannot hide behind an incremental build.
 #
-#  2. Release gate (only when relevant). If this push changes anything that
+#  2. FFI warnings gate (always). Gate 1 only promotes GLEAM warnings:
+#     warnings the Erlang compiler raises on the FFI sources are printed
+#     but `gleam build --warnings-as-errors` still exits 0 (verified on
+#     OTP 29 with the deprecated-catch warning — it sailed through). So the
+#     project's own .erl files are compiled again, directly with
+#     `erlc +warnings_as_errors`, which does refuse them. Scoped to OUR
+#     sources only: a dependency's warnings are upstream's to fix, not a
+#     reason to block this repo's pushes (known instance: fs_server.erl's
+#     deprecated catch — fixed on synrc/fs master, no Hex release yet).
+#
+#  3. Release gate (only when relevant). If this push changes anything that
 #     feeds the self-contained release (src/, gleam.toml, manifest.toml, or
 #     the release builder), build that release and smoke-test that the
 #     bundle runs on its OWN bundled OTP. This keeps the promise that `main`
@@ -15,7 +25,7 @@
 #     docs-only push, which skips it. The build is heavy (~80s + a copy of
 #     the OTP tree), which is exactly why it is gated on relevance.
 #
-#  3. Tray gate (only when relevant). If this push changes the Rust tray
+#  4. Tray gate (only when relevant). If this push changes the Rust tray
 #     crate (integrations/tray/), run its tests. Skipped with a warning when
 #     cargo is absent — Rust is an optional component toolchain.
 #
@@ -37,7 +47,22 @@ if ! gleam build --warnings-as-errors; then
   exit 1
 fi
 
-# --- 2. release gate (only when release-relevant files changed) ------------
+# --- 2. FFI warnings gate (always) -----------------------------------------
+# Only the project's own .erl files; module filenames never contain spaces,
+# so the unquoted expansion below is safe.
+echo "pre-push: erlc +warnings_as_errors (FFI sources)"
+erl_srcs="$(find src test -maxdepth 1 -name '*.erl' 2>/dev/null)"
+if [ -n "$erl_srcs" ]; then
+  erl_tmp="$(mktemp -d)"
+  if ! erlc +warnings_as_errors -o "$erl_tmp" $erl_srcs; then
+    rm -rf "$erl_tmp"
+    echo "pre-push: Erlang FFI sources have warnings — push refused." >&2
+    exit 1
+  fi
+  rm -rf "$erl_tmp"
+fi
+
+# --- 3. release gate (only when release-relevant files changed) ------------
 # Read the pushed ref lines git feeds on stdin and decide whether any commit
 # in this push touches the release inputs. When the range cannot be resolved
 # (new branch with no known base, unreadable input), fail SAFE toward running
@@ -108,7 +133,7 @@ if [ -n "$(push_touches '^(src/|gleam\.toml$|manifest\.toml$|scripts/build-relea
   echo "pre-push: self-contained release builds and runs."
 fi
 
-# --- 3. tray gate (only when the Rust tray changed) ------------------------
+# --- 4. tray gate (only when the Rust tray changed) ------------------------
 # The tray is a separate Rust crate; keep it green the same way. If cargo is
 # absent we only warn — Rust is an optional component toolchain, not required
 # to work on the daemon.
