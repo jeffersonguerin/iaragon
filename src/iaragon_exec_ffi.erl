@@ -36,6 +36,10 @@ collect_output(Port, Acc) ->
     %% alive-but-stuck actor. 10 s of silence (the clock resets on every
     %% chunk of output) is far beyond anything these helpers do.
     after 10000 ->
-        catch port_close(Port),
+        %% The port may already be gone (the child died just as the clock
+        %% fired), which makes port_close throw badarg — irrelevant here, the
+        %% outcome is the same: the port is closed. try/catch rather than the
+        %% old `catch` prefix, which OTP 29 deprecates.
+        try port_close(Port) catch error:badarg -> true end,
         {error, <<"command produced no output for 10s; gave up">>}
     end.
