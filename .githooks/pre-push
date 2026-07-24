@@ -187,6 +187,12 @@ if [ -n "$(push_touches '^(src/|gleam\.toml$|manifest\.toml$|scripts/build-relea
     exit 1
   fi
   echo "pre-push: self-contained release builds and runs."
+  # Keep the tarball in reach of step 5: the bundle that just passed the
+  # smoke is exactly what the rolling release should serve. (The EXIT trap
+  # cleans $out only after the whole hook, so the file survives until then.)
+  for t in "$out"/iaragon-*.tar.gz; do
+    [ -f "$t" ] && release_tarball="$t"
+  done
 fi
 
 # --- 4. tray gate (only when the Rust tray changed) ------------------------
@@ -278,5 +284,26 @@ if [ -n "$main_sha" ]; then
     fi
   else
     echo "pre-push: warning: no formula stable pin found — stable tag not moved" >&2
+  fi
+
+  # The rolling release ASSET: when gate 3 rebuilt the bundle (the push
+  # changed release inputs), publish that very bundle — it just passed the
+  # smoke — so the `latest` asset tracks every product-changing push. A
+  # docs-only push skips gate 3 and keeps the existing asset, which is
+  # content-identical by construction (the bundle carries no docs). The gh
+  # token comes from the same credential helper the tag pushes already use.
+  if [ -n "${release_tarball:-}" ] && [ -f "${release_tarball:-}" ]; then
+    if command -v gh >/dev/null 2>&1; then
+      gh_token="$(printf 'protocol=https\nhost=github.com\n' \
+        | git credential fill 2>/dev/null | sed -n 's/^password=//p')"
+      if [ -n "$gh_token" ] \
+        && GH_TOKEN="$gh_token" gh release upload latest "$release_tarball" --clobber >/dev/null 2>&1; then
+        echo "pre-push: rolling release asset refreshed ($(basename "$release_tarball"))"
+      else
+        echo "pre-push: warning: release asset NOT refreshed — run scripts/publish-release.sh" >&2
+      fi
+    else
+      echo "pre-push: warning: gh not found — release asset NOT refreshed" >&2
+    fi
   fi
 fi

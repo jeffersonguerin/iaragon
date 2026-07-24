@@ -181,10 +181,13 @@ da `vX.Y.Z` imutável, o pre-push mantém dois ponteiros móveis (forçados —
 mover é a semântica; consumo exige `git fetch --tags --force`):
 - **`latest`** → o commit mais novo de `main`, deliberadamente o MESMO nome
   do release rolling que o install.sh consome — "latest" significa uma coisa
-  só em todo lugar. Defasagem aceita e documentada: o ASSET do release sob
-  esse nome só atualiza quando o mantenedor roda `publish-release.sh`; entre
-  pushes a tag anda na frente do bundle publicado (a URL de download segue
-  servindo o asset existente).
+  só em todo lugar. E o ASSET acompanha: quando o gate 3 reconstrói o bundle
+  (push que muda insumos do release), o pre-push publica ESSE bundle — que
+  acabou de passar no smoke — via `gh release upload --clobber` (token do
+  mesmo credential helper que os pushes de tag já usam). Push só-de-docs
+  pula o gate 3 e mantém o asset, que é idêntico por construção (o bundle
+  não carrega docs). Sem gh/token o push NUNCA falha por isso — avisa e o
+  `publish-release.sh` manual continua sendo o fallback.
 - **`stable`** → o commit da tag pinada no `stable` block da Formula (a
   Formula é a fonte de verdade do canal estável); o hook lê o pin do commit
   pushado e alinha a tag mecanicamente — mover o pin move a tag no push
