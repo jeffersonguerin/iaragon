@@ -46,6 +46,21 @@ const watch_debounce_ms = 1500
 
 const status_call_timeout_ms = 500
 
+/// The reserved request line a tray sends for the one-glance aggregate. Never
+/// collides with a real overlay query — those are absolute mirror paths.
+const status_overall_query = "?status"
+
+/// The wire word for a sync status; `None` (no such path / no board) is
+/// "unknown". Shared by the per-path overlay query and the `?status` aggregate.
+fn word_for_status(status: option.Option(entry.SyncStatus)) -> String {
+  case status {
+    Some(entry.Syncing) -> "syncing"
+    Some(entry.Synced) -> "synced"
+    Some(entry.SyncFailed) -> "failed"
+    None -> "unknown"
+  }
+}
+
 /// YYYY-MM-DD in UTC, for conflicted-copy names.
 fn build_date_stamp() -> String {
   let #(date, _time) =
@@ -252,26 +267,37 @@ pub fn start_daemon(
     })
   let answer_status = fn(line) {
     let prefix = mirror_root <> "/"
-    case
-      string.starts_with(line, prefix),
-      process.subject_owner(status_board_subject)
-    {
-      True, Ok(_) -> {
-        let path = string.drop_start(line, string.length(prefix))
-        case
-          process.call(
-            status_board_subject,
-            status_call_timeout_ms,
-            status_board.FetchStatus(path, _),
-          )
-        {
-          Some(entry.Syncing) -> "syncing"
-          Some(entry.Synced) -> "synced"
-          Some(entry.SyncFailed) -> "failed"
-          None -> "unknown"
+    // A reserved sentinel (never a real path — those are absolute) asks for
+    // the one-glance aggregate a tray shows; everything else is a per-path
+    // query for the file-manager overlay.
+    case line == status_overall_query, string.starts_with(line, prefix) {
+      True, _ ->
+        case process.subject_owner(status_board_subject) {
+          Ok(_) ->
+            word_for_status(
+              Some(process.call(
+                status_board_subject,
+                status_call_timeout_ms,
+                status_board.FetchOverall,
+              )),
+            )
+          Error(_) -> "unknown"
         }
-      }
-      _, _ -> "unknown"
+      False, True ->
+        case process.subject_owner(status_board_subject) {
+          Ok(_) -> {
+            let path = string.drop_start(line, string.length(prefix))
+            word_for_status(
+              process.call(
+                status_board_subject,
+                status_call_timeout_ms,
+                status_board.FetchStatus(path, _),
+              ),
+            )
+          }
+          Error(_) -> "unknown"
+        }
+      False, False -> "unknown"
     }
   }
 

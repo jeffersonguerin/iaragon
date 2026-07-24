@@ -7,14 +7,19 @@
 
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
-import iaragon/domain/entry.{type SyncStatus, Synced}
+import iaragon/domain/entry.{type SyncStatus, SyncFailed, Synced, Syncing}
 
 pub type Command {
   MarkStatus(path: String, status: SyncStatus)
   FetchStatus(path: String, reply: Subject(Option(SyncStatus)))
+  /// The one-glance aggregate for a tray/status indicator: `Syncing` if any
+  /// path is in flight, else `SyncFailed` if any path is failing, else
+  /// `Synced` (idle-and-healthy — the empty board included).
+  FetchOverall(reply: Subject(SyncStatus))
 }
 
 pub type BoardConfig {
@@ -68,5 +73,23 @@ fn handle_command(
       process.send(reply, status)
       actor.continue(state)
     }
+    FetchOverall(reply) -> {
+      process.send(reply, summarize(state.statuses))
+      actor.continue(state)
+    }
+  }
+}
+
+/// Priority fold over the in-flight statuses: work in flight is the headline,
+/// then a failure, else at rest. An empty board is `Synced` — nothing wrong.
+fn summarize(statuses: Dict(String, SyncStatus)) -> SyncStatus {
+  let values = dict.values(statuses)
+  case list.any(values, fn(s) { s == Syncing }) {
+    True -> Syncing
+    False ->
+      case list.any(values, fn(s) { s == SyncFailed }) {
+        True -> SyncFailed
+        False -> Synced
+      }
   }
 }

@@ -1,7 +1,7 @@
 import gleam/erlang/process.{type Subject}
 import gleam/option.{None, Some}
 import iaragon/application/status_board
-import iaragon/domain/entry.{Synced, Syncing}
+import iaragon/domain/entry.{SyncFailed, Synced, Syncing}
 
 // The status board answers "what is the sync state of this path?" for
 // presentation adapters (the Dolphin plugin's socket server). Transfers
@@ -51,4 +51,38 @@ pub fn transient_state_wins_over_the_known_index_test() {
   process.send(board, status_board.MarkStatus("docs/report.txt", Syncing))
   assert process.call(board, 500, status_board.FetchStatus("docs/report.txt", _))
     == Some(Syncing)
+}
+
+// --- overall (aggregate) status: the tray's one-glance signal ------------
+
+pub fn overall_is_synced_when_idle_test() {
+  // Nothing in flight, nothing failed: the daemon is at rest and healthy.
+  let board = start_board(fn(_path) { False })
+
+  assert process.call(board, 500, status_board.FetchOverall) == Synced
+}
+
+pub fn overall_is_syncing_when_any_path_syncing_test() {
+  let board = start_board(fn(_path) { False })
+
+  process.send(board, status_board.MarkStatus("a.txt", Synced))
+  process.send(board, status_board.MarkStatus("b.txt", Syncing))
+  assert process.call(board, 500, status_board.FetchOverall) == Syncing
+}
+
+pub fn overall_is_failed_when_a_path_failed_and_none_syncing_test() {
+  let board = start_board(fn(_path) { False })
+
+  process.send(board, status_board.MarkStatus("a.txt", Synced))
+  process.send(board, status_board.MarkStatus("b.txt", SyncFailed))
+  assert process.call(board, 500, status_board.FetchOverall) == SyncFailed
+}
+
+pub fn overall_prefers_syncing_over_failed_test() {
+  // Work in flight is the headline even if something else has failed.
+  let board = start_board(fn(_path) { False })
+
+  process.send(board, status_board.MarkStatus("a.txt", SyncFailed))
+  process.send(board, status_board.MarkStatus("b.txt", Syncing))
+  assert process.call(board, 500, status_board.FetchOverall) == Syncing
 }
