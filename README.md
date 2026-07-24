@@ -85,10 +85,6 @@ fetched from), `IARAGON_REF` (git ref, default `main`), `IARAGON_PREFIX`
 deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`, `REBAR3_VERSION` (pin the
 rebar3 download), `IARAGON_NO_SUDO=1`.
 
-It installs the `iaragon` (daemon) and `iaragon-login` launchers to
-`~/.local/bin`, plus a systemd **user** unit at
-`~/.config/systemd/user/iaragon.service`.
-
 ### Homebrew
 
 Rolling release — no version tags, so the formula is HEAD-only:

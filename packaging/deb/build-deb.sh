@@ -115,6 +115,7 @@ Maintainer: Jefferson Guerin <jeffersonguerin@users.noreply.github.com>
 Installed-Size: $INSTALLED_KB
 Section: utils
 Priority: optional
+Depends: libc6
 Recommends: inotify-tools
 Homepage: https://github.com/jeffersonguerin/iaragon
 Description: Bidirectional Google Drive sync daemon (Mirror mode) for Linux
@@ -125,6 +126,9 @@ Description: Bidirectional Google Drive sync daemon (Mirror mode) for Linux
  for instant local-change detection (the daemon falls back to polling
  without it).
 EOF
+
+# Debian Policy: every package carries /usr/share/doc/<pkg>/copyright.
+install -D -m 0644 "$ROOT_DIR/LICENSE" "$PKGDIR/usr/share/doc/iaragon/copyright"
 
 # Ship the units read-only; everything root-owned regardless of build uid.
 chmod -R u+rwX,go+rX "$PKGDIR/usr/lib/systemd"

@@ -141,7 +141,14 @@ impl ksni::Tray for IaragonTray {
                 label: "Open mirror folder".into(),
                 icon_name: "folder".into(),
                 activate: Box::new(move |_: &mut Self| {
-                    let _ = std::process::Command::new("xdg-open").arg(&mirror).spawn();
+                    // Reap the child in a detached thread: dropping a Child
+                    // without wait() leaves a zombie per click for the
+                    // tray's whole lifetime.
+                    if let Ok(mut child) = std::process::Command::new("xdg-open").arg(&mirror).spawn() {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                    }
                 }),
                 ..Default::default()
             }
@@ -183,7 +190,17 @@ fn main() {
     loop {
         std::thread::sleep(Duration::from_secs(3));
         let status = query_status(&socket);
-        handle.update(|tray: &mut IaragonTray| tray.status = status);
+        // `update` returns None once the tray service has shut down (e.g.
+        // the session bus went away). Looping on would leave an invisible,
+        // zombie-alive process that systemd's Restart=on-failure can never
+        // fix — exit non-zero instead so the unit restarts us.
+        if handle
+            .update(|tray: &mut IaragonTray| tray.status = status)
+            .is_none()
+        {
+            eprintln!("iaragon-tray: tray service shut down; exiting for a supervised restart");
+            std::process::exit(1);
+        }
     }
 }
 

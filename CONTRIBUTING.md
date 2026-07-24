@@ -51,7 +51,7 @@ out of a sync daemon. Read this once and everything else follows.
   intent (`reconcile`, `PutKnown`, `EnqueueUpload`). One documented
   exception: `pub fn supervised()` on actor modules (the canonical
   gleam_otp pattern).
-- **Erlang FFI stays thin** and only where indispensable — see the four
+- **Erlang FFI stays thin** and only where indispensable — see the six
   existing `src/iaragon_*_ffi.erl` files for the size budget.
 
 ## Invariants that must never break

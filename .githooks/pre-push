@@ -64,7 +64,13 @@ push_touches() {
           echo yes; return                                   # no base — validate to be safe
         fi ;;
     esac
-    if git diff --name-only "$range" 2>/dev/null | grep -Eq "$pattern"; then
+    # Distinguish "diff ran and matched nothing" from "diff FAILED" (e.g. the
+    # remote sha is not present locally after a remote-side move): a failed
+    # diff must fail SAFE toward running the check, not silently skip it.
+    if ! changed="$(git diff --name-only "$range" 2>/dev/null)"; then
+      echo yes; return
+    fi
+    if printf '%s\n' "$changed" | grep -Eq "$pattern"; then
       echo yes; return
     fi
   done <<EOF

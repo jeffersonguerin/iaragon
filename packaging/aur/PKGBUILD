@@ -33,6 +33,10 @@ pkgver() {
 
 build() {
   cd "$srcdir/$_pkgname"
+  # NOTE: fetches hex dependencies over the network here. That breaks strict
+  # offline/chroot builds (extra-x86_64-build); acceptable for an AUR -git
+  # package (same pattern as most cargo/go VCS packages), but a known limit —
+  # vendoring the hex deps into source= would be the fix if it ever matters.
   gleam export erlang-shipment
 }
 
@@ -63,9 +67,12 @@ EOF
   install -Dm644 dist/iaragon.service        "$pkgdir/usr/lib/systemd/user/iaragon.service"
   install -Dm644 dist/iaragon-doctor.service "$pkgdir/usr/lib/systemd/user/iaragon-doctor.service"
   install -Dm644 dist/iaragon-doctor.timer   "$pkgdir/usr/lib/systemd/user/iaragon-doctor.timer"
-  # The versioned unit points ExecStart at %h/.local/bin; rewrite to the
-  # packaged /usr/bin path.
-  sed -i 's#%h/.local/bin/iaragon#/usr/bin/iaragon#' "$pkgdir/usr/lib/systemd/user/iaragon.service"
+  # The versioned units point ExecStart at %h/.local/bin; rewrite BOTH
+  # service units to the packaged /usr/bin path (the daemon's and the
+  # doctor's — missing the doctor unit means a 203/EXEC on every timer run).
+  sed -i 's#%h/.local/bin/iaragon#/usr/bin/iaragon#' \
+    "$pkgdir/usr/lib/systemd/user/iaragon.service" \
+    "$pkgdir/usr/lib/systemd/user/iaragon-doctor.service"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

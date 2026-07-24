@@ -47,8 +47,11 @@ have "$GLEAM" || die "gleam not found (set GLEAM=/path/to/gleam)"
 # Source root of the OTP install to bundle (…/erts-*, …/lib, …/bin live here).
 OTP_ROOT=$("$ERL" -noshell -eval 'io:format("~s",[code:root_dir()]),halt().')
 [ -d "$OTP_ROOT" ] || die "could not resolve the OTP root from '$ERL'"
-ERTS=$(basename "$(ls -d "$OTP_ROOT"/erts-* | head -n1)")
-[ -n "$ERTS" ] || die "no erts-* directory under $OTP_ROOT"
+# Ask the RUNNING erl which ERTS it uses instead of globbing erts-* — an OTP
+# root carrying two erts versions (in-place upgrade) would otherwise let the
+# alphabetically-first one win, mismatching the version otp/bin/erl hardcodes.
+ERTS="erts-$("$ERL" -noshell -eval 'io:format("~s",[erlang:system_info(version)]),halt().')"
+[ -d "$OTP_ROOT/$ERTS" ] || die "no $ERTS directory under $OTP_ROOT"
 
 ARCH=$(uname -m)
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -75,6 +78,11 @@ for d in build/erlang-shipment/*/; do
   name=$(basename "$d")
   cp -a "$d" "$STAGE/app/$name"
 done
+
+# Apache-2.0 compliance: the tarball redistributes iaragon AND Erlang/OTP
+# (both Apache-2.0), so it must carry the license text and the NOTICE.
+cp "$ROOT_DIR/LICENSE" "$STAGE/LICENSE"
+cp "$ROOT_DIR/NOTICE"  "$STAGE/NOTICE"
 
 # The runtime: erts + the OTP libraries + the root scripts (relocatable).
 mkdir -p "$STAGE/otp"

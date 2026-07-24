@@ -1,10 +1,12 @@
-# systemd *user* unit for the iaragon sync daemon.
+# systemd *user* unit for the iaragon sync daemon — the REFERENCE template.
 #
-# The installer (install.sh) copies this to
-# ~/.config/systemd/user/iaragon.service, rewriting ExecStart to the real
-# launcher path when a non-default prefix is used. The %h specifier expands
-# to the invoking user's home directory, so the default-prefix install
-# (~/.local) needs no rewrite.
+# install.sh generates its own unit (heredoc, absolute ExecStart) rather than
+# copying this file; the .deb and .rpm recipes carry their own copies too.
+# When editing directives here, mirror the change in install.sh,
+# packaging/deb/build-deb.sh and packaging/rpm/iaragon.spec — the four must
+# stay functionally identical. The AUR PKGBUILD DOES install this file
+# (rewriting ExecStart to /usr/bin), so %h must keep pointing at the default
+# ~/.local prefix.
 #
 # Manage it per-user (no root):
 #   systemctl --user daemon-reload

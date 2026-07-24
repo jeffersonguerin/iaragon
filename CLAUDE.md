@@ -57,8 +57,10 @@ de arquivos.
   redirects ELE MESMO, com `autoredirect` desligado, removendo o
   `Authorization` quando a origem muda — não delegar isso ao httpc, ver
   CVE-2026-48856 em docs/security-log.md),
-  `src/iaragon_file_ffi.erl` (leitura em chunks p/ upload resumable) e
-  `src/iaragon_exec_ffi.erl` (os:find_executable p/ detectar inotify-tools).
+  `src/iaragon_file_ffi.erl` (leitura em chunks p/ upload resumable),
+  `src/iaragon_exec_ffi.erl` (os:find_executable p/ detectar inotify-tools),
+  `src/iaragon_status_ffi.erl` (servidor line-protocol do status socket) e
+  `src/iaragon_probe_ffi.erl` (cliente do socket p/ o doctor + halt/stdio).
   Armadilha aprendida: `{stream, path}` FAZ APPEND em arquivo existente — por
   isso downloads vão para `<dest>.iaragon-partial` e são renomeados no
   sucesso (atomicidade de espelho de graça).

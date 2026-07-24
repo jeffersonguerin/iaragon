@@ -102,6 +102,7 @@ WantedBy=timers.target
 EOF
 
 %files
+%license LICENSE
 %{_bindir}/iaragon
 %{_bindir}/iaragon-login
 %{_bindir}/iaragon-doctor

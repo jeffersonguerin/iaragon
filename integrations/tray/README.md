@@ -43,10 +43,14 @@ Requires the Rust toolchain (`cargo`) to build; at runtime it needs a session
 D-Bus and a tray host (KDE Plasma natively; GNOME via the AppIndicator
 extension). No libdbus dev package is required — zbus is pure Rust.
 
-Autostart as a per-user service (installed template at
-`dist/iaragon-tray.service`):
+Nothing installs the tray automatically yet — install.sh and the native
+packages ship only the daemon. To run it as a per-user service, place the
+binary and the unit template yourself, then enable it:
 
 ```sh
+install -m755 target/release/iaragon-tray ~/.local/bin/
+install -m644 ../../dist/iaragon-tray.service ~/.config/systemd/user/
+systemctl --user daemon-reload
 systemctl --user enable --now iaragon-tray.service
 ```
 

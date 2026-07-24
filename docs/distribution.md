@@ -46,12 +46,13 @@ runtime, documentada, nunca um bloqueio.
 Dois caminhos de instalação (curl e Homebrew), o template systemd e as
 decisões/princípios do instalador.
 
-Dois caminhos de instalação, ambos compilando o release Erlang precompilado
-(`gleam export erlang-shipment` → `build/erlang-shipment/` com `entrypoint.sh`)
-e instalando dois launchers: `iaragon` (daemon = `entrypoint.sh run`) e
-`iaragon-login` (`erl -pa …/*/ebin -noshell -eval 'iaragon@login:main(),
-halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
-`iaragon@login`; o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
+O `install.sh` instala três launchers (`iaragon`, `iaragon-login`,
+`iaragon-doctor`) — por padrão a partir do release autocontido; no fallback
+source, compilando o shipment (`gleam export erlang-shipment` →
+`build/erlang-shipment/` com `entrypoint.sh`; daemon = `entrypoint.sh run`,
+login = `erl -pa …/*/ebin -noshell -eval 'iaragon@login:main(), halt(0)'`).
+O módulo Gleam `iaragon/login` compila para o átomo Erlang `iaragon@login`;
+o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
 `oauth_client.json`), o que dá um smoke test barato.
 
 - **`install.sh`** (`curl -sSL …/install.sh | sh`): POSIX sh, daemon
@@ -113,7 +114,10 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
   depends_on "inotify-tools"`); instalações brew já existentes são reusadas,
   não duplicadas. `test do` roda o login launcher.
 - **`dist/iaragon.service`**: template versionado da unit (usa `%h` p/ o
-  prefixo padrão; o instalador reescreve o `ExecStart` p/ prefixo custom).
+  prefixo padrão). Atenção: o `install.sh` GERA a própria unit (heredoc, path
+  absoluto) em vez de copiar este template; `.deb`/`.rpm` carregam cópias
+  próprias e o PKGBUILD instala o template com sed no `ExecStart`. Mudou uma
+  diretiva → espelhar nos quatro lugares (aviso no cabeçalho do template).
 - **Pacotes nativos** (`packaging/`, detalhes em
   [packaging/README.md](../packaging/README.md)): `.deb` (bundle autocontido,
   **construído+`dpkg -i`/run/remove validado** aqui), `.rpm` (`spec`, bundle,

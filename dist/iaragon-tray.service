@@ -5,8 +5,12 @@
 # default.target the daemon uses. Enable per-user:
 #   systemctl --user enable --now iaragon-tray.service
 #
-# The installer/packages place the binary at <prefix>/bin/iaragon-tray; adjust
-# ExecStart if you built it elsewhere.
+# NOTHING installs the tray automatically yet (install.sh and the packages
+# ship only the daemon): build it yourself and place both pieces —
+#   cargo build --release --manifest-path integrations/tray/Cargo.toml
+#   install -m755 integrations/tray/target/release/iaragon-tray ~/.local/bin/
+#   install -m644 dist/iaragon-tray.service ~/.config/systemd/user/
+# Adjust ExecStart if you install the binary elsewhere.
 
 [Unit]
 Description=iaragon — system tray status indicator
