@@ -1,13 +1,14 @@
-# Homebrew formula for iaragon.
+# Homebrew formula for iaragon — the project's primary distribution channel.
 #
-# Rolling release: there are no version tags, so this is a HEAD-only formula.
-# Install it straight from the tap-less local file or a tap:
+# stable builds the v1.0.0 tag from a checksum-pinned tarball; --HEAD tracks
+# main (rolling, no changelog). Install from the tap:
 #
-#   brew install --HEAD jeffersonguerin/iaragon/iaragon
+#   brew install jeffersonguerin/iaragon/iaragon          # stable
+#   brew install --HEAD jeffersonguerin/iaragon/iaragon   # rolling
 #
 # or, from a local checkout:
 #
-#   brew install --HEAD ./Formula/iaragon.rb
+#   brew install ./Formula/iaragon.rb
 #
 # Note: the daemon itself targets Linux (inotify watcher, GVfs/KDE status
 # emblems). The formula builds and installs cleanly on macOS too, but the
@@ -15,6 +16,8 @@
 class Iaragon < Formula
   desc "Bidirectional Google Drive sync daemon for Linux, on the BEAM"
   homepage "https://github.com/jeffersonguerin/iaragon"
+  url "https://github.com/jeffersonguerin/iaragon/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "f7c3f6de7999b51dc66595e7a08bd7492e3432fa6d89b0bf6c1f5f651fa7e016"
   license "Apache-2.0"
   head "https://github.com/jeffersonguerin/iaragon.git", branch: "main"
 
