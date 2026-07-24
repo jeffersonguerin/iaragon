@@ -67,18 +67,28 @@ class Iaragon < Formula
     end
   end
 
+  # Supervision parity with the native packages (.deb/.rpm ship a systemd
+  # user unit): `brew services start iaragon` — on Linux brew services
+  # renders this into a systemd user unit, on macOS into launchd. keep_alive
+  # on crash only: a clean exit stays down (mirrors Restart=on-failure).
+  service do
+    run [opt_bin/"iaragon"]
+    keep_alive crashed: true
+    log_path var/"log/iaragon.log"
+    error_log_path var/"log/iaragon.log"
+  end
+
   def caveats
     <<~EOS
       Set up a Google Cloud "Desktop app" OAuth client and save it as
       ~/.config/iaragon/oauth_client.json:
         {"client_id": "...", "client_secret": "..."}
 
-      Then log in and start the daemon:
-        iaragon-login          # opens your browser (loopback + PKCE)
-        iaragon                # runs the daemon in the foreground
+      Then log in and start the daemon under supervision:
+        iaragon-login                  # opens your browser (loopback + PKCE)
+        brew services start iaragon    # supervised (systemd --user on Linux)
 
-      On Linux you can supervise it as a systemd user service; see
-      dist/iaragon.service in the repository. The mirror lives at ~/GoogleDrive.
+      (Or run `iaragon` in the foreground.) The mirror lives at ~/GoogleDrive.
 
       Erlang, Gleam, rebar3 (and inotify-tools on Linux) were installed as
       Homebrew dependencies, so the whole toolchain stays under brew.
