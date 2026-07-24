@@ -42,7 +42,29 @@ of them restarts that actor alone.
 
 ## Install
 
-### curl (Linux)
+### Homebrew (primary)
+
+The supported package-manager channel — one channel, done well. The stable
+install builds the `v1.0.0` tag with a pinned tarball checksum; `--HEAD`
+tracks `main` (rolling):
+
+```sh
+brew tap jeffersonguerin/iaragon https://github.com/jeffersonguerin/iaragon
+brew install jeffersonguerin/iaragon/iaragon          # stable (v1.0.0)
+brew install --HEAD jeffersonguerin/iaragon/iaragon   # rolling (main)
+```
+
+The whole toolchain (Erlang, Gleam, rebar3, and `inotify-tools` on Linux)
+comes through Homebrew as formula dependencies. Then supervise it:
+
+```sh
+brew services start iaragon    # systemd --user on Linux, launchd on macOS
+```
+
+(The daemon targets Linux; the formula builds on macOS too, but the sync
+daemon is meant for a Linux desktop.)
+
+### curl (compatibility)
 
 ```sh
 curl -sSL https://raw.githubusercontent.com/jeffersonguerin/iaragon/main/install.sh | sh
@@ -84,19 +106,6 @@ fetched from), `IARAGON_REF` (git ref, default `main`), `IARAGON_PREFIX`
 (default `~/.local`), `IARAGON_PM` (force the package manager for missing
 deps, e.g. `brew`), `IARAGON_REPO`, `GLEAM_VERSION`, `REBAR3_VERSION` (pin the
 rebar3 download), `IARAGON_NO_SUDO=1`.
-
-### Homebrew
-
-Rolling release — no version tags, so the formula is HEAD-only:
-
-```sh
-brew install --HEAD jeffersonguerin/iaragon/iaragon
-```
-
-The whole toolchain (Erlang, Gleam, rebar3, and `inotify-tools` on Linux)
-comes through Homebrew as formula dependencies — one consistent source, no
-mixing with a system package manager. (The daemon targets Linux; the formula
-builds on macOS too, but the sync daemon is meant for a Linux desktop.)
 
 ## Running
 

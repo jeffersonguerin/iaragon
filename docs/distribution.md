@@ -130,36 +130,30 @@ o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
   absoluto) em vez de copiar este template; `.deb`/`.rpm` carregam cópias
   próprias e o PKGBUILD instala o template com sed no `ExecStart`. Mudou uma
   diretiva → espelhar nos quatro lugares (aviso no cabeçalho do template).
-- **Pacotes nativos** (`packaging/`, detalhes em
-  [packaging/README.md](../packaging/README.md)): `.deb` (bundle autocontido,
-  **construído+`dpkg -i`/run/remove validado** aqui), `.rpm` (`spec`, bundle,
-  validar no host RPM), `PKGBUILD` AUR (**build-from-source** dependendo do
-  `erlang` da distro — idiomático no rolling e ainda herda updates de OTP via
-  pacman). Versão derivada do git (`0.0.<n>+g<sha>`, rolling sem tags).
 - **Publicação** (`scripts/publish-release.sh`): sem CI remoto (decisão), o
   mantenedor roda isto num host de build (um por arch) e sobe o tarball
   autocontido para um único release rolling GitHub taggeado `latest` (ponteiro
   de distribuição, NÃO tag de versão) via `gh`. O `install.sh` consome
   `releases/latest/download/…`.
-- **Repo apt assinado** (`scripts/publish-apt.sh`, sessão 25): auto-update de
-  `.deb` via `apt upgrade` EXISTE — repositório dedicado
-  `github.com/<owner>/iaragon-apt` servido por raw.githubusercontent.com
-  (o `Filename:` do apt é relativo à raiz do archive, então GitHub Releases
-  não serve; Pages é opcional/cosmético). Repo SEPARADO de propósito: cada
-  publish commita um `.deb` de ~65 MB e git nunca esquece — no repo de código
-  isso incharia todo clone para sempre; no dedicado o peso fica em quarentena
-  e a história pode ser squashada sem tocar no código (clientes apt leem só a
-  ponta). Assinatura ed25519 com chave dedicada (GNUPGHOME próprio, fora de
-  qualquer repo; pública versionada como `iaragon-archive-keyring.gpg` na
-  raiz do iaragon-apt junto com o snippet deb822 de instalação). O script
-  builda o `.deb`, poda o pool (`IARAGON_APT_KEEP`, default 2 — limite rígido
-  do GitHub é 100 MB/arquivo, o bundle tem ~65), regenera
-  Packages/Release, assina (InRelease + Release.gpg, SHA512) e pusha.
-  Validado e2e nesta máquina: `apt update` reconhece a assinatura,
-  `apt install iaragon` baixa 67 MB do repo remoto, serviço volta, doctor
-  verde. Cache do raw: ~5 min entre o push e os clientes verem.
-  **Auto-update de `.rpm`** segue exigindo repo yum assinado (mesma receita,
-  `createrepo_c`, não montado).
+- **Decisão de produto (sessão 26): brew é O canal de pacote — "uma coisa
+  bem feita em vez de várias mais-ou-menos".** O que mudou:
+  - **Aposentados**: os pacotes nativos (`packaging/` — `.deb`/`.rpm`/AUR,
+    removidos do repo; a história do git guarda as receitas) e o **repo apt
+    assinado** da sessão 25 (`iaragon-apt`, arquivado no GitHub com nota de
+    descontinuação; `scripts/publish-apt.sh` removido). O canal apt foi
+    validado e2e antes de aposentar — funcionava; morreu por custo de
+    manutenção (segundo repositório + chave + metadados) frente a zero
+    clientes reais, não por defeito.
+  - **Mantidos**: a Formula (canal primário, agora com `stable` na tag
+    `v1.0.0` + sha256 pinado e `--HEAD` rolling; supervisão via
+    `brew services`) e o **curl/install.sh como compatibilidade** — o release
+    autocontido rolling continua publicado, SEM assinatura (confiança =
+    TLS + GitHub, como o cabeçalho do install.sh documenta). O gate de
+    release do pre-push continua: ele testa o produto (o bundle roda no
+    próprio OTP), não o canal.
+  - Racional do trade-off de segurança: o apt era o único canal com trava
+    criptográfica própria; o `stable` do brew recupera integridade via
+    sha256 do tarball da tag; `--HEAD` e curl confiam no git/TLS.
 - Fato verificado: `gleam export erlang-shipment` produz um release
   autocontido; `entrypoint.sh run` execa `erl -pa "$BASE"/*/ebin -eval
   "iaragon@@main:run(iaragon)" -noshell`. E2e validado clonando `main`,
