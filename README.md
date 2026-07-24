@@ -146,12 +146,12 @@ it is free and takes 10-15 minutes:
 4. Create the client — "Create OAuth client" (or Credentials → Create
    credentials → OAuth client ID), application type **Desktop app**:
    <https://console.cloud.google.com/auth/clients>
-5. Copy the client ID and secret into
-   `~/.config/iaragon/oauth_client.json`, shaped exactly:
-
-   ```json
-   {"client_id": "...", "client_secret": "..."}
-   ```
+5. Click **Download JSON** on the client and save that file, as-is, to
+   `~/.config/iaragon/oauth_client.json` — just rename the downloaded
+   `client_secret_….json`. No copying fields by hand: iaragon reads Google's
+   file verbatim (the `{"installed": {…}}` wrapper it downloads, or `{"web":
+   {…}}`), and a plain `{"client_id": "...", "client_secret": "..."}` still
+   works too.
 
 6. **Publish the app "In production"** (Audience → Publishing status →
    Publish app): <https://console.cloud.google.com/auth/audience>

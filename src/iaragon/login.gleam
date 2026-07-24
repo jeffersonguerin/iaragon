@@ -4,9 +4,10 @@
 //// oauth, token_store) — this module only wires them together and talks to
 //// the human, so it carries no logic of its own to unit-test.
 ////
-//// Prerequisite: ~/.config/iaragon/oauth_client.json with the Desktop-app
-//// credentials from your Google Cloud project:
-////   {"client_id": "…", "client_secret": "…"}
+//// Prerequisite: ~/.config/iaragon/oauth_client.json — the JSON Google's
+//// console downloads for your "Desktop app" client, saved as-is (the
+//// {"installed": {…}} wrapper is read verbatim; a plain
+//// {"client_id": …, "client_secret": …} also works).
 
 import envoy
 import gleam/float
@@ -63,9 +64,10 @@ fn run_login() -> Result(String, String) {
         }
         client_store.Corrupted ->
           client_path
-          <> " exists but is not the expected JSON — it must be shaped "
-          <> "exactly {\"client_id\": \"...\", \"client_secret\": \"...\"} "
-          <> "(the values come from your Google Cloud \"Desktop app\" client)"
+          <> " exists but is not a recognisable OAuth client JSON — it should "
+          <> "be the file Google's console downloads ({\"installed\": {…}} or "
+          <> "{\"web\": {…}}), or a plain {\"client_id\": \"...\", "
+          <> "\"client_secret\": \"...\"}"
       }
     }),
   )

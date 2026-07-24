@@ -68,3 +68,42 @@ pub fn a_corrupted_client_file_reports_corrupted_test() {
   let assert Ok(Nil) = simplifile.write(to: path, contents: "{}")
   assert client_store.load_client(path) == Error(client_store.Corrupted)
 }
+
+// Google's console hands you a client_secret_*.json to DOWNLOAD, shaped
+// {"installed": {"client_id": ..., "client_secret": ..., ...}} (or "web").
+// Accepting it verbatim spares the user hand-crafting oauth_client.json —
+// the single biggest paper cut in first-run setup.
+
+pub fn loads_the_google_downloaded_installed_json_test() {
+  let path = scratch_dir <> "/installed/oauth_client.json"
+  let assert Ok(Nil) =
+    simplifile.create_directory_all(scratch_dir <> "/installed")
+  let assert Ok(Nil) =
+    simplifile.write(
+      to: path,
+      contents: "{\"installed\":{\"client_id\":\"abc.apps.googleusercontent.com\","
+        <> "\"project_id\":\"my-proj\",\"client_secret\":\"s3cr3t\","
+        <> "\"redirect_uris\":[\"http://localhost\"]}}",
+    )
+  assert client_store.load_client(path)
+    == Ok(OauthClient(
+      client_id: "abc.apps.googleusercontent.com",
+      client_secret: "s3cr3t",
+    ))
+}
+
+pub fn loads_the_google_downloaded_web_json_test() {
+  let path = scratch_dir <> "/web/oauth_client.json"
+  let assert Ok(Nil) = simplifile.create_directory_all(scratch_dir <> "/web")
+  let assert Ok(Nil) =
+    simplifile.write(
+      to: path,
+      contents: "{\"web\":{\"client_id\":\"w.apps.googleusercontent.com\","
+        <> "\"client_secret\":\"web-secret\"}}",
+    )
+  assert client_store.load_client(path)
+    == Ok(OauthClient(
+      client_id: "w.apps.googleusercontent.com",
+      client_secret: "web-secret",
+    ))
+}

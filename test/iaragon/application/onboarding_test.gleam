@@ -42,11 +42,13 @@ pub fn the_guide_asks_for_a_desktop_app_client_test() {
   assert string.contains(guide(), "Desktop app")
 }
 
-pub fn the_guide_shows_the_exact_json_shape_test() {
-  assert string.contains(
-    guide(),
-    "{\"client_id\": \"...\", \"client_secret\": \"...\"}",
-  )
+pub fn the_guide_tells_you_to_download_and_save_the_json_test() {
+  // The smooth path: download Google's client JSON and save it as-is, no
+  // hand-transcribing fields. Pin the load-bearing words — the "Download
+  // JSON" action and that the downloaded `installed` wrapper is accepted.
+  let guide = guide()
+  assert string.contains(guide, "Download JSON")
+  assert string.contains(guide, "installed")
 }
 
 pub fn the_guide_warns_about_the_testing_expiry_test() {

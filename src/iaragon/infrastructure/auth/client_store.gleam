@@ -37,11 +37,22 @@ pub fn load_client(path: String) -> Result(OauthClient, LoadError) {
   use contents <- result.try(
     simplifile.read(from: path) |> result.map_error(Unreadable),
   )
-  let decoder = {
+  json.parse(from: contents, using: client_decoder())
+  |> result.replace_error(Corrupted)
+}
+
+/// Accepts either iaragon's own flat `{client_id, client_secret}` or, verbatim,
+/// the `client_secret_*.json` Google's console hands you to download —
+/// `{"installed": {…}}` for a Desktop app, `{"web": {…}}` for a web app — so
+/// the user never has to hand-transcribe the two fields into a new file.
+fn client_decoder() -> decode.Decoder(OauthClient) {
+  let fields = {
     use client_id <- decode.field("client_id", decode.string)
     use client_secret <- decode.field("client_secret", decode.string)
     decode.success(OauthClient(client_id:, client_secret:))
   }
-  json.parse(from: contents, using: decoder)
-  |> result.replace_error(Corrupted)
+  decode.one_of(fields, or: [
+    decode.at(["installed"], fields),
+    decode.at(["web"], fields),
+  ])
 }
