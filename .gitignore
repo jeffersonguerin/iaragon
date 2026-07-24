@@ -4,3 +4,4 @@
 erl_crash.dump
 rebar3.crashdump
 integrations/dolphin/build/
+integrations/tray/target/

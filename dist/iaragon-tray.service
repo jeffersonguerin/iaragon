@@ -1,0 +1,29 @@
+# systemd *user* unit for the optional iaragon tray indicator.
+#
+# The tray is a StatusNotifierItem helper: it needs a graphical session with a
+# tray host, so it is bound to graphical-session.target rather than the plain
+# default.target the daemon uses. Enable per-user:
+#   systemctl --user enable --now iaragon-tray.service
+#
+# The installer/packages place the binary at <prefix>/bin/iaragon-tray; adjust
+# ExecStart if you built it elsewhere.
+
+[Unit]
+Description=iaragon — system tray status indicator
+Documentation=https://github.com/jeffersonguerin/iaragon
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/iaragon-tray
+# The tray may start before the tray host is ready (or find none yet); let it
+# come back rather than give up. A start-limit keeps that from becoming a
+# tight loop when no SNI host exists at all.
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=graphical-session.target

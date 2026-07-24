@@ -32,7 +32,13 @@ de arquivos.
 ## Stack (decidida — não propor alternativa sem pedido explícito)
 
 - **Gleam** (compilador 1.17.0), alvo **Erlang/BEAM**. NÃO usar alvo JS/Deno; não
-  propor Rust/Node.
+  propor Rust/Node **para o daemon** (o núcleo é Gleam/BEAM e assim fica).
+  Ressalva de escopo (sessão 24): **binários de integração standalone** — que
+  não compartilham código com o daemon e só falam com ele pelo status socket —
+  podem usar a linguagem que a integração exigir. Já há dois: o plugin Dolphin
+  em C++ (a ABI de plugin do Dolphin obriga) e o tray SNI em Rust
+  (`integrations/tray/`, crate `ksni` 0.3 sobre zbus puro-Rust — binário ~2 MB,
+  sem libdbus C). Isso NÃO abre a porta para Rust/Node no daemon.
 - **OTP** (gleam_otp 1.2) para atores e árvore de supervisão. Escolha deliberada:
   um sync daemon é um conjunto de processos de vida longa que falham de forma
   independente; a supervisão dá isolamento de falha (poller cai num erro

@@ -1,0 +1,22 @@
+[package]
+name = "iaragon-tray"
+version = "0.0.0"
+edition = "2021"
+description = "System-tray (StatusNotifierItem) status indicator for the iaragon Google Drive sync daemon"
+license = "Apache-2.0"
+repository = "https://github.com/jeffersonguerin/iaragon"
+
+[[bin]]
+name = "iaragon-tray"
+path = "src/main.rs"
+
+[dependencies]
+# ksni 0.3 speaks DBus via pure-Rust zbus (no libdbus C library). The
+# "blocking" feature gives a synchronous API over the default tokio reactor,
+# so main() stays a plain loop.
+ksni = { version = "0.3", features = ["blocking"] }
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true

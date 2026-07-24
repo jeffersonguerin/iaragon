@@ -15,6 +15,12 @@ out of a sync daemon. Read this once and everything else follows.
   under a UTF-8 locale (`LANG=C.UTF-8`) — a POSIX/latin1 locale puts the BEAM
   in latin1 filename mode and the accented-path tests fail (a locale issue,
   not a code one).
+- **Optional integrations** have their own toolchains, needed only if you work
+  on them: the Dolphin overlay plugin (`integrations/dolphin/`) needs a C++/Qt
+  build (CMake), and the system-tray indicator (`integrations/tray/`) needs
+  the Rust toolchain (`cargo`). The `pre-push` hook runs the tray's
+  `cargo test` when that crate changes (skipped with a warning if cargo is
+  absent).
 - One-time, from the repo root:
 
   ```sh
