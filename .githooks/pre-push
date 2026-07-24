@@ -247,15 +247,36 @@ if [ -n "$main_sha" ]; then
     fi
   fi
 
-  # canary: a MOVING channel pointer to the newest main commit — never a
-  # version itself (the vX.Y.Z tags are the immutable history; this is the
-  # named tip, same idea as the `latest` release pointer). Forced on
-  # purpose: moving is its semantics. Consumers refreshing it need
-  # `git fetch --tags --force` — the standard caveat of channel tags.
-  git tag -f canary "$main_sha" >/dev/null
-  if git push --no-verify --quiet --force origin refs/tags/canary; then
-    echo "pre-push: canary -> $(git rev-parse --short "$main_sha")"
+  # Channel pointers, MOVING tags — never versions themselves (the vX.Y.Z
+  # tags are the immutable history). Forced on purpose: moving is their
+  # semantics; consumers refreshing them need `git fetch --tags --force`.
+  #
+  # latest: the newest main commit — deliberately the SAME name as the
+  # rolling release install.sh consumes, so "latest" means one thing
+  # everywhere. The release ASSET under that name only refreshes when the
+  # maintainer runs publish-release.sh: between pushes the tag is ahead of
+  # the published bundle, and that lag is accepted and documented.
+  git tag -f latest "$main_sha" >/dev/null
+  if git push --no-verify --quiet --force origin refs/tags/latest; then
+    echo "pre-push: latest -> $(git rev-parse --short "$main_sha")"
   else
-    echo "pre-push: warning: could not move the canary tag (kept locally)" >&2
+    echo "pre-push: warning: could not move the latest tag (kept locally)" >&2
+  fi
+
+  # stable: wherever the Formula's pinned tag points — the Formula is the
+  # source of truth for the stable channel, and this keeps the named
+  # pointer aligned with it mechanically (move the pin, the next push
+  # moves the tag).
+  pinned="$(git show "$main_sha:Formula/iaragon.rb" 2>/dev/null \
+    | sed -n 's#.*refs/tags/\(v[0-9][0-9.]*\)\.tar\.gz.*#\1#p' | head -1)"
+  if [ -n "$pinned" ] && pinned_sha="$(git rev-parse --verify --quiet "$pinned^{commit}")"; then
+    git tag -f stable "$pinned_sha" >/dev/null
+    if git push --no-verify --quiet --force origin refs/tags/stable; then
+      echo "pre-push: stable -> $pinned ($(git rev-parse --short "$pinned_sha"))"
+    else
+      echo "pre-push: warning: could not move the stable tag (kept locally)" >&2
+    fi
+  else
+    echo "pre-push: warning: no formula stable pin found — stable tag not moved" >&2
   fi
 fi

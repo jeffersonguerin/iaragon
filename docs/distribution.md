@@ -176,10 +176,18 @@ não subiu fica local com aviso). Aritmética autotestável sem push:
 tabela de 8 casos, carry duplo incluído). O `stable` da Formula NÃO segue as
 tags automaticamente — atualizar o pin (url+sha256) segue decisão deliberada.
 
-Canal `canary` (sessão 28, na sequência do odômetro): além da `vX.Y.Z`
-imutável, o pre-push move a tag `canary` (ponteiro leve, forçado) para o
-commit mais novo de `main` a cada push — o "tip nomeado", mesma ideia do
-ponteiro `latest` do release. Nunca é uma versão; quem acompanha precisa de
-`git fetch --tags --force` (caveat padrão de tag de canal). Canais, então:
-`stable` = pin da Formula (deliberado), `canary` = tip do main (a tag e o
-`brew install --HEAD`), `latest` = último bundle publicado.
+Tags de canal `stable`/`latest` (sessão 28, na sequência do odômetro): além
+da `vX.Y.Z` imutável, o pre-push mantém dois ponteiros móveis (forçados —
+mover é a semântica; consumo exige `git fetch --tags --force`):
+- **`latest`** → o commit mais novo de `main`, deliberadamente o MESMO nome
+  do release rolling que o install.sh consome — "latest" significa uma coisa
+  só em todo lugar. Defasagem aceita e documentada: o ASSET do release sob
+  esse nome só atualiza quando o mantenedor roda `publish-release.sh`; entre
+  pushes a tag anda na frente do bundle publicado (a URL de download segue
+  servindo o asset existente).
+- **`stable`** → o commit da tag pinada no `stable` block da Formula (a
+  Formula é a fonte de verdade do canal estável); o hook lê o pin do commit
+  pushado e alinha a tag mecanicamente — mover o pin move a tag no push
+  seguinte. Mover o pin segue decisão deliberada.
+O nome `canary` existiu por um push (v1.0.2) e foi renomeado para `latest`
+na sequência, a pedido — unificação com o nome que o install.sh já usava.
