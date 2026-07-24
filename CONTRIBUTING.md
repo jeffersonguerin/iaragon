@@ -8,8 +8,13 @@ out of a sync daemon. Read this once and everything else follows.
 
 - **Erlang/OTP ≥ 29** (older OTP either crashes at runtime or sits on a branch
   no longer receiving httpc security fixes — see `docs/security-log.md`) and
-  **Gleam ≥ 1.17**; `rebar3` on PATH; `gcc`/`make` (sqlight's NIF);
-  `inotify-tools` optional (tests fall back to polling without it).
+  **Gleam ≥ 1.17**; **rebar3 ≥ 3.27.0** (the first release that supports OTP
+  29 — an older rebar3 dies with `rebar_uri:parse undef` on the very OTP this
+  project requires); `gcc`/`make` (sqlight's NIF); `inotify-tools` optional
+  (tests fall back to polling without it). On a bare container run the suite
+  under a UTF-8 locale (`LANG=C.UTF-8`) — a POSIX/latin1 locale puts the BEAM
+  in latin1 filename mode and the accented-path tests fail (a locale issue,
+  not a code one).
 - One-time, from the repo root:
 
   ```sh

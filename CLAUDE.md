@@ -136,13 +136,30 @@ Histórico e residuais documentados em `docs/`.
 - **Erlang/OTP ≥ 29 obrigatório em runtime** (piso subido de 26 na sessão 22:
   nenhuma release do OTP 26 recebeu o fix do CVE-2026-48856 do httpc, então
   quem ficasse no 26 não tinha para onde subir dentro do ramo — ver
-  [docs/security-log.md](docs/security-log.md)). Histórico: o OTP 25 do apt compila, mas
-  `bit_array.base64_url_encode` do stdlib explode em runtime ("OTP/26 or
-  higher is required"). Usar OTP pré-compilado do builds.hex.pm:
-  `curl https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-27.3.4.14.tar.gz`,
-  extrair p/ /opt/otp27, rodar `/opt/otp27/Install -minimal /opt/otp27`,
-  `export PATH=/opt/otp27/bin:$PATH` (exportar em cada shell novo).
-- `rebar3` via apt (necessário para compilar a dep Erlang `fs` do filespy).
+  [docs/security-log.md](docs/security-log.md)). Precisão (sessão 23): o fix
+  do CVE em inets **9.7.1** entrou no **OTP 29.0.2** (29.0/29.0.1 têm inets
+  9.7 SEM o fix); o daemon não depende disso (FFI de download com
+  `autoredirect=false` + strip próprio), então o `install.sh` bloqueia em
+  major < 29 e só AVISA (`inets_patched`, não barra) se inets < 9.7.1.
+  Histórico: o OTP 25 do apt compila, mas `bit_array.base64_url_encode` do
+  stdlib explode em runtime ("OTP/26 or higher is required"). Dev/CI: usar
+  OTP pré-compilado do builds.hex.pm:
+  `curl https://builds.hex.pm/builds/otp/ubuntu-24.04/OTP-29.0.3.tar.gz`,
+  extrair p/ /opt/otp29, rodar `/opt/otp29/Install -minimal /opt/otp29`,
+  `export PATH=/opt/otp29/bin:$PATH` (exportar em cada shell novo).
+  **Verificado empiricamente na sessão 23**: build limpo
+  (`--warnings-as-errors`, recompilando o NIF C do esqlite e a dep Erlang
+  `fs`) e suíte completa (307) VERDE em OTP 29.0.3 / inets 9.7.1 — fecha o
+  gap de "desenvolver abaixo do piso". Rodar sob `LANG=C.UTF-8` (o container
+  cru é POSIX/latin1 e a VM abre nome de arquivo em latin1, falhando os
+  testes de path acentuado — não é bug do código, é locale).
+- **`rebar3` ≥ 3.27.0** (sessão 23): a primeira release que suporta OTP 29;
+  rebar3 mais velho morre com `rebar_uri:parse undef` no primeiro uso sob
+  OTP 29 (reproduzido: o 3.19 do apt). O `install.sh` agora tem gate de
+  versão (`rebar3_new_enough`, espelhando o do Gleam): rebar3 presente mas
+  velho demais NÃO é aceito — cai no escript oficial (`releases/latest`,
+  ≥ 3.27), sem tocar o rebar3 do sistema. Necessário para compilar a dep
+  Erlang `fs` do filespy.
 - Binário do Gleam: GitHub releases; se o GitHub estiver bloqueado pelo proxy da
   sessão, extrair da imagem OCI oficial `ghcr.io/gleam-lang/gleam:vX.Y.Z-scratch`
   (binário musl estático em `/bin/gleam`, baixável com curl + Bearer token
@@ -162,7 +179,7 @@ Histórico e residuais documentados em `docs/`.
   pre-commit por decisão do usuário: ciclo de commit barato, gate na
   saída. Bypass de emergência: `--no-verify`. O hook NÃO exporta o PATH do OTP (exigir isso
   do shell chamador); commits via ferramenta precisam do
-  `export PATH=/opt/otp27/bin:$PATH` no mesmo comando.
+  `export PATH=/opt/otp29/bin:$PATH` no mesmo comando.
 - **LSP do Gleam para Claude Code (sessão 16)**: plugin versionado em
   `.claude/skills/gleam-lsp/` (`.claude-plugin/plugin.json` + `.lsp.json`
   com `command: gleam, args: [lsp], extensionToLanguage: {".gleam":

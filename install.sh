@@ -227,6 +227,23 @@ gleam_new_enough() {
 }
 cc_ok() { have cc || have gcc; }
 
+# rebar3 must match the runtime: OTP 29 (this script's floor) needs
+# rebar3 >= 3.27.0 — older rebar3 dies with `rebar_uri:parse undef` the moment
+# it runs, so a stale distro rebar3 (Debian/Ubuntu ship 3.19-ish) or one
+# already on PATH would fail the build cryptically on the very OTP we require.
+# Gate it like Gleam and OTP.
+REBAR3_MIN_MAJOR=3
+REBAR3_MIN_MINOR=27
+rebar3_ver() { rebar3 version 2>/dev/null | awk '{print $2}'; }
+rebar3_new_enough() {
+  v="$(rebar3_ver)"; [ -n "$v" ] || return 1
+  maj="${v%%.*}"; rest="${v#*.}"; min="${rest%%.*}"
+  case "$maj" in ''|*[!0-9]*) return 1 ;; esac
+  case "$min" in ''|*[!0-9]*) min=0 ;; esac
+  [ "$maj" -gt "$REBAR3_MIN_MAJOR" ] && return 0
+  [ "$maj" -eq "$REBAR3_MIN_MAJOR" ] && [ "$min" -ge "$REBAR3_MIN_MINOR" ]
+}
+
 # --- ensure_* : install one dependency, method preserved -------------------
 ensure_base() { # generic-dep  binary-to-check  human-name
   have "$2" && { log "$3: present"; return 0; }
@@ -301,12 +318,23 @@ ensure_gleam() {
 
 # rebar3 is needed to compile the Erlang dep behind filespy (fs).
 ensure_rebar3() {
-  have rebar3 && { log "rebar3: present"; return 0; }
-  if [ "$PM" != "none" ]; then
+  # A rebar3 already on PATH is kept ONLY if it is new enough for OTP 29;
+  # an older one (common on distros) would crash the build on the very OTP
+  # this script requires, so fall through to the official escript rather
+  # than accept it. The user's own rebar3 is never modified — the fresh
+  # escript lands in BINDIR, which precedes PATH for the build.
+  if have rebar3; then
+    rebar3_new_enough && { log "rebar3 $(rebar3_ver): present"; return 0; }
+    note "rebar3 $(rebar3_ver) predates ${REBAR3_MIN_MAJOR}.${REBAR3_MIN_MINOR} (needed for OTP 29) — fetching the official escript into $BINDIR (your rebar3 is left untouched)"
+  elif [ "$PM" != "none" ]; then
     log "installing rebar3 via $PM"
     pkg_for rebar3 || true
-    have rebar3 && { add_newly "rebar3($PM)"; log "rebar3: installed via $PM"; return 0; }
-    note "$PM does not package rebar3 — falling back to the official escript"
+    if have rebar3 && rebar3_new_enough; then
+      add_newly "rebar3($PM)"; log "rebar3 $(rebar3_ver): installed via $PM"; return 0
+    fi
+    have rebar3 \
+      && note "$PM's rebar3 $(rebar3_ver) predates ${REBAR3_MIN_MAJOR}.${REBAR3_MIN_MINOR} (needed for OTP 29) — falling back to the official escript" \
+      || note "$PM does not package rebar3 — falling back to the official escript"
   fi
   if [ -n "${REBAR3_VERSION:-}" ]; then
     url="https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3"
@@ -377,7 +405,9 @@ p_cc=$(cc_ok && echo x || true)
 p_make=$(have make && echo x || true)
 p_erl=$(otp_ok && echo x || true)
 p_gleam=$(gleam_ok && echo x || true)
-p_rebar=$(have rebar3 && echo x || true)
+# Version-aware like p_erl: a present-but-too-old rebar3 (crashes on OTP 29)
+# must show in the plan as "install", not "present".
+p_rebar=$(rebar3_new_enough && echo x || true)
 p_inotify=$(have inotifywait && echo x || true)
 
 log "dependency plan — present items are kept, missing ones installed for you:"

@@ -257,3 +257,25 @@ download streaming real, cliente de upload resumable real (inclusive a
 validação googleapis da session URI — o fake devolve Location googleapis e
 o send redireciona). Cenário prova as duas direções: arquivo remoto chega
 byte a byte no espelho; arquivo criado localmente sobe com os bytes exatos.
+
+Fase validação do bump OTP 29 (sessão 23): revisão da subida do piso para
+OTP 29 contra a doc oficial + auditoria de segurança das versões de deps.
+Achados: **nenhuma API que o daemon usa mudou** em OTP 29 (file/gen_tcp/
+uri_string/unicode/crypto/httpc/os intactos; encoding de nome de arquivo
+sem mudança, o decode `unicode:characters_to_list(Path, utf8)` continua
+certo); **nenhuma dep Hex tem bump disponível** — as 15 + esqlite/fs + o
+compilador Gleam já estão na última estável (nada mais novo para carregar
+fix). Verificação empírica no OTP real do piso (baixado do builds.hex.pm,
+OTP 29.0.3 / inets 9.7.1): build limpo `--warnings-as-errors` recompilando
+o NIF C do esqlite e a dep Erlang `fs` sob os novos diagnósticos default do
+OTP 29 (deprecated `catch`, comprehension-rebind) — zero warnings — e suíte
+completa (307) verde. Fecha o gap de desenvolver em OTP 27 abaixo do piso 29.
+Correção de usuário no `install.sh`: gate `rebar3_new_enough` (≥ 3.27.0,
+espelhando o do Gleam) — o instalador exigia OTP ≥ 29 mas aceitava qualquer
+rebar3, e rebar3 < 3.27 morre com `rebar_uri:parse undef` em OTP 29
+(reproduzido com o 3.19 do apt); rebar3 presente-mas-velho agora cai no
+escript oficial sem tocar o do sistema. Nada a corrigir no código; só
+toolchain e precisão de doc (o fix do CVE em inets 9.7.1 é OTP 29.0.2+,
+mitigado independentemente pelo FFI). Item observado p/ o futuro (OTP 30):
+`httpc` fecha `max_connections_open` ilimitado hoje — irrelevante com pool
+serial, mas setar explícito se surgir uso concorrente do httpc.
