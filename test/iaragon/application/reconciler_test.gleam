@@ -1310,3 +1310,68 @@ pub fn a_materialized_native_never_collides_with_a_sibling_blob_test() {
     receive_transfers(dispatches, 2)
   assert first.path != second.path
 }
+
+pub fn a_stale_timer_tick_is_dropped_without_running_a_round_test() {
+  // Timers armed on the actor's NAME survive its crash: a tick from a
+  // previous incarnation must die (no round, no re-arm) or every crash
+  // would add one everlasting timer chain.
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let sut = start_reconciler(owner, dispatches, [], Error("unused"))
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "a.txt", "root")]),
+  )
+  // The seed round downloads the file once.
+  let assert [DownloadDispatched(_)] = receive_transfers(dispatches, 1)
+
+  // A stale generation (the real one is random and non-negative).
+  process.send(sut, reconciler.TickRound(-1))
+  assert expect_no_transfers(dispatches)
+
+  // The actor is alive and still reconciles on demand.
+  process.send(sut, reconciler.ReconcileNow)
+  let assert [DownloadDispatched(_)] = receive_transfers(dispatches, 1)
+  Nil
+}
+
+pub fn a_late_pool_down_spares_transfers_sent_to_the_new_pool_test() {
+  // The pool died and restarted; a round dispatched an upload to the NEW
+  // pool before the OLD pool's Down was processed. Clearing that pending
+  // would re-dispatch a live transfer — files.create twice — and duplicate
+  // the file on Drive. Only entries tagged with the DEAD pid may go.
+  let old_pool = process.spawn(fn() { process.sleep(30_000) })
+  let new_pool = process.spawn(fn() { process.sleep(30_000) })
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let local =
+    LocalFile(path: "mine.txt", size: 3, mtime_seconds: 1000, md5: None)
+  let sut =
+    start_reconciler_with_interval(
+      owner,
+      dispatches,
+      [local],
+      Error("unused"),
+      idle_round_interval,
+      entry.LinkFile,
+      // Dispatches happening now go to (and are tagged with) the NEW pool.
+      fn() { Ok(new_pool) },
+    )
+
+  process.send(sut, reconciler.SeedMirror("root", []))
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+
+  // The OLD pool's Down arrives late: the pending tagged new_pool survives,
+  // so the next round does NOT re-dispatch.
+  process.send(sut, reconciler.ForgetInFlight(Some(old_pool)))
+  process.send(sut, reconciler.ReconcileNow)
+  assert expect_no_transfers(dispatches)
+
+  // The NEW pool dying is a real loss: the pending clears and the next
+  // round re-dispatches.
+  process.send(sut, reconciler.ForgetInFlight(Some(new_pool)))
+  process.send(sut, reconciler.ReconcileNow)
+  let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
+  Nil
+}

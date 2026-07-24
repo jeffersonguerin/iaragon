@@ -20,6 +20,11 @@ pub type Command {
   /// path is in flight, else `SyncFailed` if any path is failing, else
   /// `Synced` (idle-and-healthy — the empty board included).
   FetchOverall(reply: Subject(SyncStatus))
+  /// The path ceased to exist locally (deleted, or a move's old source):
+  /// drop its entry so a stale `SyncFailed` can never pin the aggregate,
+  /// and the board's footprint tracks the live mirror instead of growing
+  /// with every path that ever existed.
+  ClearStatus(path: String)
 }
 
 pub type BoardConfig {
@@ -77,6 +82,10 @@ fn handle_command(
       process.send(reply, summarize(state.statuses))
       actor.continue(state)
     }
+    ClearStatus(path) ->
+      actor.continue(
+        State(..state, statuses: dict.delete(state.statuses, path)),
+      )
   }
 }
 

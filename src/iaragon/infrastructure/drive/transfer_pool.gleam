@@ -115,6 +115,10 @@ pub type TransferConfig {
     /// (relative path, status) — user-visible sync-state signal (file
     /// manager emblems). Decoration only: failures never fail a transfer.
     signal_status: fn(String, entry.SyncStatus) -> Nil,
+    /// (relative path) — the path ceased to exist locally (deleted, or a
+    /// move's old source). Lets the status board drop its entry so a stale
+    /// SyncFailed cannot pin the aggregate forever. Decoration only.
+    clear_status: fn(String) -> Nil,
     /// Outcome feedback into the reconciler (path / file_id keyed).
     settle_upload: fn(String, Result(RemoteSighting, String)) -> Nil,
     settle_trash: fn(String, Result(Nil, String)) -> Nil,
@@ -253,8 +257,12 @@ fn run_delete_local(config: TransferConfig, known: entry.KnownFile) -> Nil {
     }
   }
   case removed {
-    True ->
+    True -> {
       process.send(config.state_owner, state_owner.ForgetKnown(known.file_id))
+      // The path is gone: drop any lingering board entry (a SyncFailed left
+      // by an earlier attempt would otherwise pin the aggregate forever).
+      config.clear_status(known.path)
+    }
     False -> Nil
   }
 }
@@ -308,6 +316,8 @@ fn run_move_local(
   case moved {
     Ok(Nil) -> {
       process.send(config.state_owner, state_owner.PutKnown(updated))
+      // The old source path no longer exists — drop its board entry.
+      config.clear_status(from)
       // A plain rename drops gvfs metadata: repaint the destination.
       config.signal_status(updated.path, entry.Synced)
     }
@@ -575,15 +585,34 @@ fn write_link_file(
 }
 
 fn record_downloaded(config: TransferConfig, remote: RemoteFile) -> Nil {
-  record_known(
-    config,
-    remote.file_id,
-    remote.path,
-    remote.modified_time,
-    remote.md5,
-    option.unwrap(remote.size, 0),
-    remote.kind,
-  )
+  // Edit-vs-record race: the user can touch the file in the instant between
+  // the download's rename and this record. Recording then would mark the
+  // EDITED bytes as "synced" (remote md5 + edited size/mtime), so the edit
+  // never uploads and the next remote change silently overwrites it. For a
+  // blob whose remote size is known, a size mismatch on disk means exactly
+  // that — skip recording; with no known entry, the next round sees
+  // both-created and preserves the edit as a conflict copy.
+  let user_touched = case remote.kind, remote.size {
+    Blob, option.Some(expected_size) ->
+      case simplifile.file_info(config.root_dir <> "/" <> remote.path) {
+        Ok(info) -> info.size != expected_size
+        Error(_) -> False
+      }
+    _, _ -> False
+  }
+  case user_touched {
+    True -> Nil
+    False ->
+      record_known(
+        config,
+        remote.file_id,
+        remote.path,
+        remote.modified_time,
+        remote.md5,
+        option.unwrap(remote.size, 0),
+        remote.kind,
+      )
+  }
 }
 
 // --- Uploads ------------------------------------------------------------------
@@ -606,14 +635,24 @@ fn run_upload(
         Ok(Nil) -> actor.continue(state)
         Error(reason) -> {
           settle_upload_or_retry(state, plan, failed_attempts, reason)
-          actor.continue(state)
+          actor.continue(drop_created_folders(state))
         }
       }
     Error(reason) -> {
       settle_upload_or_retry(state, plan, failed_attempts, reason)
-      actor.continue(state)
+      actor.continue(drop_created_folders(state))
     }
   }
+}
+
+/// Any upload error empties the created-folders cache. A cached id can be
+/// the very cause of the failure — the folder was deleted remotely and the
+/// live model no longer lists it, so every retry would 404 against the dead
+/// id until the daemon restarts. Dropping the whole cache is safe (folders
+/// are re-created or re-observed on demand) and only costs a little churn
+/// on genuinely transient errors.
+fn drop_created_folders(state: State) -> State {
+  State(..state, created_folders: dict.new())
 }
 
 /// Create the plan's missing folder chain (outermost first), reusing ids of

@@ -145,6 +145,12 @@ pub fn start_daemon(
           status_board.MarkStatus(path, status),
         )
       },
+      // A deleted (or moved-away) path drops off the board so a stale
+      // SyncFailed can never pin the tray's aggregate. Best-effort like the
+      // signal above.
+      clear_status: fn(path) {
+        send_best_effort(status_board_subject, status_board.ClearStatus(path))
+      },
       settle_upload: fn(path, outcome) {
         process.send(reconciler_subject, reconciler.SettleUpload(path, outcome))
       },

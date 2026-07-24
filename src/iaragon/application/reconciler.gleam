@@ -20,7 +20,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
-import gleam/set.{type Set}
 import gleam/string
 import iaragon/application/state_owner
 import iaragon/domain/conflicts
@@ -107,14 +106,23 @@ pub type Command {
   /// the renamed sighting straight into the model.
   SettleMove(file_id: String, outcome: Result(RemoteSighting, String))
   /// Run a round without new remote input — local edits have no other
-  /// trigger until a filesystem watcher lands.
+  /// trigger until a filesystem watcher lands. Never re-arms the periodic
+  /// timer: the watcher sends one of these per activity burst, and each
+  /// re-arm would spawn one more everlasting timer chain.
   ReconcileNow
+  /// The periodic timer chain. The generation must match the one this
+  /// incarnation armed: a tick from a PREVIOUS incarnation's chain (timers
+  /// on the actor's NAME survive its crash) is dropped without re-arming,
+  /// so crashes cannot multiply chains.
+  TickRound(generation: Int)
   /// The monitored transfer pool went down (delivered by its monitor). Any
-  /// upload/trash/move it was carrying will never settle, so the matching
-  /// pending guards must be dropped — otherwise those paths/ids would stop
-  /// syncing until this actor itself restarts. The next round re-dispatches
-  /// whatever is still needed against the restarted pool.
-  ForgetInFlight
+  /// upload/trash/move THAT POOL was carrying will never settle, so pending
+  /// guards tagged with its pid must be dropped — otherwise those paths/ids
+  /// would stop syncing until this actor itself restarts. Guards tagged
+  /// with a DIFFERENT pid were dispatched to the already-restarted pool
+  /// (its Down is merely late in the mailbox) and stay: clearing them would
+  /// re-dispatch a live transfer and duplicate the file remotely.
+  ForgetInFlight(died: Option(process.Pid))
 }
 
 pub type ReconcilerConfig {
@@ -173,14 +181,20 @@ type State {
     /// with a trash in flight: never re-dispatched until settled. A remote
     /// move holds both keys (its file_id and its destination path), tracked
     /// in pending_move_paths for the settle to clear.
-    pending_uploads: Set(String),
-    pending_trashes: Set(String),
-    pending_conflicts: Set(String),
+    /// Every pending guard is tagged with the pool pid it was dispatched to
+    /// (resolved at dispatch time), so a pool crash clears exactly the
+    /// entries that died with it — see `ForgetInFlight`.
+    pending_uploads: Dict(String, Option(process.Pid)),
+    pending_trashes: Dict(String, Option(process.Pid)),
+    pending_conflicts: Dict(String, Option(process.Pid)),
     pending_move_paths: Dict(String, String),
     /// The live monitor on the transfer pool, if one is established. `None`
     /// before the pool is first seen and after it goes down (re-established
     /// on the next message via `ensure_pool_monitored`).
     pool_monitor: Option(process.Monitor),
+    /// Identifies THIS incarnation's periodic timer chain; ticks carrying
+    /// any other generation are stale chains from before a crash.
+    timer_generation: Int,
     /// Streak flags for report_trouble: the first suppressed/failed round
     /// reports, the rest of the streak stays quiet, and a healthy round
     /// resets them.
@@ -190,11 +204,37 @@ type State {
 }
 
 fn forget_pending_upload(state: State, path: String) -> State {
-  State(..state, pending_uploads: set.delete(state.pending_uploads, path))
+  State(..state, pending_uploads: dict.delete(state.pending_uploads, path))
 }
 
 fn forget_pending_trash(state: State, file_id: String) -> State {
-  State(..state, pending_trashes: set.delete(state.pending_trashes, file_id))
+  State(..state, pending_trashes: dict.delete(state.pending_trashes, file_id))
+}
+
+/// The pid tag a dispatch records: whichever pool pid is registered right
+/// now. `None` while the pool is mid-restart — treated as "unknown pool" and
+/// cleared on any pool Down.
+fn current_pool_tag(state: State) -> Option(process.Pid) {
+  state.config.resolve_pool_pid() |> option.from_result
+}
+
+/// Drop the entries whose tag matches the dead pool (or whose pool was
+/// unknown at dispatch time). `None` for the dead pid means the Down carried
+/// no pid (never for a process monitor) — clear everything, the safe reading.
+fn drop_dead_entries(
+  entries: Dict(k, Option(process.Pid)),
+  died: Option(process.Pid),
+) -> Dict(k, Option(process.Pid)) {
+  case died {
+    None -> dict.new()
+    Some(dead_pid) ->
+      dict.filter(entries, fn(_key, tag) {
+        case tag {
+          Some(tag_pid) -> tag_pid != dead_pid
+          None -> False
+        }
+      })
+  }
 }
 
 pub fn supervised(
@@ -216,17 +256,25 @@ pub fn start(
     let selector =
       process.new_selector()
       |> process.select(subject)
-      |> process.select_monitors(fn(_down) { ForgetInFlight })
+      |> process.select_monitors(fn(down) {
+        case down {
+          process.ProcessDown(pid: pid, ..) -> ForgetInFlight(Some(pid))
+          _other -> ForgetInFlight(None)
+        }
+      })
     actor.initialised(State(
       config: config,
       self: process.named_subject(name),
       root_id: None,
       model: dict.new(),
-      pending_uploads: set.new(),
-      pending_trashes: set.new(),
-      pending_conflicts: set.new(),
+      pending_uploads: dict.new(),
+      pending_trashes: dict.new(),
+      pending_conflicts: dict.new(),
       pending_move_paths: dict.new(),
       pool_monitor: None,
+      // Random per incarnation, so a stale chain armed before a crash can
+      // never match by accident.
+      timer_generation: int.random(1_000_000_000),
       warned_mass_deletion: False,
       warned_scan: False,
     ))
@@ -251,15 +299,16 @@ fn handle_command(
         |> list.filter(fn(sighting) { !sighting.trashed })
         |> list.map(fn(sighting) { #(sighting.file_id, sighting) })
         |> dict.from_list
-      // Arm the periodic timer exactly once (each ReconcileNow re-arms it);
-      // a re-seed after a poller restart must not add a second timer chain.
+      // Arm the periodic timer exactly once per incarnation (each matching
+      // TickRound re-arms it); a re-seed after a poller restart must not add
+      // a second chain, and stale chains die by generation mismatch.
       case state.root_id {
         None -> {
           let _ =
             process.send_after(
               state.self,
               state.config.round_interval_ms,
-              ReconcileNow,
+              TickRound(state.timer_generation),
             )
           Nil
         }
@@ -303,7 +352,7 @@ fn handle_command(
       let state =
         State(
           ..state,
-          pending_conflicts: set.delete(state.pending_conflicts, path),
+          pending_conflicts: dict.delete(state.pending_conflicts, path),
         )
       actor.continue(run_round_if_seeded(state))
     }
@@ -328,29 +377,49 @@ fn handle_command(
       }
       actor.continue(run_round_if_seeded(state))
     }
-    ReconcileNow -> {
-      process.send_after(
-        state.self,
-        state.config.round_interval_ms,
-        ReconcileNow,
-      )
-      actor.continue(run_round_if_seeded(state))
-    }
-    ForgetInFlight ->
-      // The pool crashed: nothing it was carrying is in flight any more, so
-      // clear every pending guard and forget the (now dead) monitor. No round
-      // is run here — the pool may still be mid-restart, and re-dispatch is
-      // safely handled by the next round (the periodic backstop, at latest).
+    // Watcher-triggered: run a round, arm nothing (see the Command doc).
+    ReconcileNow -> actor.continue(run_round_if_seeded(state))
+    TickRound(generation) ->
+      case generation == state.timer_generation {
+        True -> {
+          process.send_after(
+            state.self,
+            state.config.round_interval_ms,
+            TickRound(generation),
+          )
+          actor.continue(run_round_if_seeded(state))
+        }
+        // A chain armed by a previous incarnation (timers on the actor's
+        // NAME outlive its crash): dropping it without re-arming is what
+        // keeps the chain count at exactly one.
+        False -> actor.continue(state)
+      }
+    ForgetInFlight(died) -> {
+      // A pool crashed: whatever THAT pool was carrying is not in flight any
+      // more, so clear the guards tagged with its pid and forget the (now
+      // dead) monitor. Entries tagged with a different pid were dispatched
+      // to the already-restarted pool — its Down is merely late in this
+      // mailbox — and must survive, or the next round would re-dispatch a
+      // live transfer and duplicate the file remotely. No round is run here;
+      // re-dispatch is handled by the next round (the periodic backstop, at
+      // latest).
+      let pending_trashes = drop_dead_entries(state.pending_trashes, died)
       actor.continue(
         State(
           ..state,
-          pending_uploads: set.new(),
-          pending_trashes: set.new(),
-          pending_conflicts: set.new(),
-          pending_move_paths: dict.new(),
+          pending_uploads: drop_dead_entries(state.pending_uploads, died),
+          pending_trashes: pending_trashes,
+          pending_conflicts: drop_dead_entries(state.pending_conflicts, died),
+          // A move holds its path mapping keyed by the same file_id as its
+          // trash guard: keep the mapping only while the guard survives.
+          pending_move_paths: dict.filter(
+            state.pending_move_paths,
+            fn(file_id, _path) { dict.has_key(pending_trashes, file_id) },
+          ),
           pool_monitor: None,
         ),
       )
+    }
   }
 }
 
@@ -517,13 +586,17 @@ fn run_round_with(state: State, locals: List(LocalFile)) -> State {
           root_id,
         )
       decision.DeleteRemote(file_id) ->
-        case set.contains(state.pending_trashes, file_id) {
+        case dict.has_key(state.pending_trashes, file_id) {
           True -> state
           False -> {
             config.dispatch_trash_remote(file_id)
             State(
               ..state,
-              pending_trashes: set.insert(state.pending_trashes, file_id),
+              pending_trashes: dict.insert(
+                state.pending_trashes,
+                file_id,
+                current_pool_tag(state),
+              ),
             )
           }
         }
@@ -648,7 +721,7 @@ fn dispatch_conflict_copy_once(
   remote_by_id: Dict(String, RemoteFile),
 ) -> State {
   case
-    set.contains(state.pending_conflicts, path),
+    dict.has_key(state.pending_conflicts, path),
     dict.get(remote_by_id, file_id)
   {
     False, Ok(remote) -> {
@@ -658,7 +731,11 @@ fn dispatch_conflict_copy_once(
       )
       State(
         ..state,
-        pending_conflicts: set.insert(state.pending_conflicts, path),
+        pending_conflicts: dict.insert(
+          state.pending_conflicts,
+          path,
+          current_pool_tag(state),
+        ),
       )
     }
     _, _ -> state
@@ -688,7 +765,7 @@ fn dispatch_move_remote_once(
   folder_ids_by_path: Dict(String, String),
   root_id: String,
 ) -> State {
-  let in_flight = set.contains(state.pending_trashes, file_id)
+  let in_flight = dict.has_key(state.pending_trashes, file_id)
   case in_flight, dict.get(state.model, file_id), dict.get(locals_by_path, to) {
     False, Ok(sighting), Ok(local) -> {
       let #(directory_segments, name) = split_file_name(to)
@@ -706,8 +783,16 @@ fn dispatch_move_remote_once(
       ))
       State(
         ..state,
-        pending_trashes: set.insert(state.pending_trashes, file_id),
-        pending_uploads: set.insert(state.pending_uploads, to),
+        pending_trashes: dict.insert(
+          state.pending_trashes,
+          file_id,
+          current_pool_tag(state),
+        ),
+        pending_uploads: dict.insert(
+          state.pending_uploads,
+          to,
+          current_pool_tag(state),
+        ),
         pending_move_paths: dict.insert(state.pending_move_paths, file_id, to),
       )
     }
@@ -723,7 +808,7 @@ fn dispatch_upload_once(
   folder_ids_by_path: Dict(String, String),
   root_id: String,
 ) -> State {
-  let already_in_flight = set.contains(state.pending_uploads, path)
+  let already_in_flight = dict.has_key(state.pending_uploads, path)
   case already_in_flight, dict.get(locals_by_path, path) {
     True, _ -> state
     False, Error(Nil) -> state
@@ -741,7 +826,14 @@ fn dispatch_upload_once(
         anchor_parent_id: anchor_parent_id,
         missing_folders: missing_folders,
       ))
-      State(..state, pending_uploads: set.insert(state.pending_uploads, path))
+      State(
+        ..state,
+        pending_uploads: dict.insert(
+          state.pending_uploads,
+          path,
+          current_pool_tag(state),
+        ),
+      )
     }
   }
 }

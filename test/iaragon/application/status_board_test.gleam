@@ -86,3 +86,15 @@ pub fn overall_prefers_syncing_over_failed_test() {
   process.send(board, status_board.MarkStatus("b.txt", Syncing))
   assert process.call(board, 500, status_board.FetchOverall) == Syncing
 }
+
+pub fn clearing_a_failed_path_releases_the_overall_test() {
+  // A path fails, then ceases to exist (deleted/moved): without the clear,
+  // its SyncFailed entry would pin the aggregate on "failed" forever.
+  let board = start_board(fn(_path) { False })
+
+  process.send(board, status_board.MarkStatus("gone.txt", SyncFailed))
+  assert process.call(board, 500, status_board.FetchOverall) == SyncFailed
+
+  process.send(board, status_board.ClearStatus("gone.txt"))
+  assert process.call(board, 500, status_board.FetchOverall) == Synced
+}

@@ -81,6 +81,7 @@ fn a_pool_config(
       panic as "no export expected in this test"
     },
     signal_status: fn(_path, _status) { Nil },
+    clear_status: fn(_path) { Nil },
     settle_upload: fn(_path, _outcome) { Nil },
     settle_trash: fn(_file_id, _outcome) { Nil },
     settle_conflict: fn(_path, _outcome) { Nil },
@@ -540,7 +541,10 @@ pub fn failed_downloads_are_retried_until_success_test() {
 
   process.send(
     pool,
-    transfer_pool.EnqueueDownload(a_remote("id-1", "flaky.txt"), option.None),
+    transfer_pool.EnqueueDownload(
+      RemoteFile(..a_remote("id-1", "flaky.txt"), size: Some(3)),
+      option.None,
+    ),
   )
 
   assert fakes.retry_until(80, fn() { known_of(owner, "id-1") != None })
@@ -911,7 +915,10 @@ pub fn a_conflict_moves_local_aside_and_downloads_the_remote_test() {
   process.send(
     pool,
     transfer_pool.EnqueueConflictCopy(
-      a_remote("id-1", "report.txt"),
+      // The size states the truth about the fake's bytes ("remote
+      // content" = 14): a mismatching on-disk size means a user edit
+      // and the pool refuses to record it as synced.
+      RemoteFile(..a_remote("id-1", "report.txt"), size: Some(14)),
       a_copy_path,
     ),
   )
@@ -1189,4 +1196,28 @@ pub fn downloads_that_keep_failing_are_dropped_not_crashed_test() {
     RemoteFile(..a_remote("id-2", "alive"), size: None, md5: None, kind: Folder)
   process.send(pool, transfer_pool.EnqueueDownload(probe, option.None))
   assert fakes.retry_until(40, fn() { known_of(owner, "id-2") != None })
+}
+
+pub fn a_local_delete_clears_the_paths_status_test() {
+  // Once the path is gone its board entry must go too — a SyncFailed left
+  // by an earlier attempt would otherwise pin the tray aggregate forever.
+  let owner = fakes.start_ephemeral_state_owner()
+  let cleared = process.new_subject()
+  let root = scratch_dir <> "/delete-clears"
+  let _ = simplifile.delete(root)
+  let assert Ok(Nil) = simplifile.create_directory_all(root)
+  let assert Ok(Nil) =
+    simplifile.write(to: root <> "/notes.desktop", contents: "link")
+  let config =
+    transfer_pool.TransferConfig(
+      ..a_pool_config(root, owner, a_working_fetch()),
+      clear_status: fn(path) { process.send(cleared, path) },
+    )
+  let pool = start_pool_with(config)
+  let known =
+    entry.KnownFile(..a_known_at("id-doc", "notes.desktop"), kind: GoogleNative)
+
+  process.send(pool, transfer_pool.EnqueueDeleteLocal(known))
+
+  let assert Ok("notes.desktop") = process.receive(cleared, 2000)
 }
