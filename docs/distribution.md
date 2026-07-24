@@ -112,7 +112,19 @@ o `main/0` volta Nil e o login trata o erro (sai 0 mesmo sem
   sem tags → `brew install --HEAD`). Via Homebrew TODO o toolchain vem do
   Homebrew (`depends_on` gleam/rebar3 build + erlang runtime + `on_linux
   depends_on "inotify-tools"`); instalações brew já existentes são reusadas,
-  não duplicadas. `test do` roda o login launcher.
+  não duplicadas. `test do` roda o login launcher. **Validada e2e no Linux
+  (sessão 25, Homebrew 6 / Linuxbrew)**, com dois fatos pagos em bug:
+  `Pathname#write` cria launcher **0644** — sem o `chmod 0755` explícito todo
+  uso morre em "Permission denied" (o install chega a reportar "Empty
+  installation" na primeira tentativa); e `brew reinstall` NÃO aceita
+  `--HEAD` no brew 6 — atualizar é `brew uninstall` + `brew install --HEAD`.
+  Supervisão com paridade aos pacotes nativos via `service do` block:
+  `brew services start` gera unit systemd de usuário no Linux
+  (`homebrew.iaragon.service`, validado: daemon sobe, socket responde,
+  doctor verde), launchd no macOS. Tap direto no repo principal funciona
+  (`brew tap <owner>/iaragon https://github.com/<owner>/iaragon`). Atenção
+  operacional: brew e `.deb` instalados juntos = risco de DOIS daemons no
+  mesmo espelho — manter só um serviço ativo.
 - **`dist/iaragon.service`**: template versionado da unit (usa `%h` p/ o
   prefixo padrão). Atenção: o `install.sh` GERA a própria unit (heredoc, path
   absoluto) em vez de copiar este template; `.deb`/`.rpm` carregam cópias
