@@ -43,3 +43,16 @@ entraram com TDD:
   bytes crus quando o path não é UTF-8 válido (um espelho pode conter
   qualquer sequência de bytes). Coberto por teste nos dois sentidos.
   Só escapou até aqui porque a suíte usava nomes ASCII.
+
+Trilha de auditoria (sessão 27): as ações destrutivas e em massa agora
+deixam registro no journal — a lacuna que tornou a investigação da lixeira
+esvaziada uma reconstrução forense (o daemon tinha 2 linhas de log em horas
+de operação, enquanto ~190 entradas de state sumiam em silêncio). Dois
+mecanismos: (1) `decision.describe_workload` (puro, no domínio) resume cada
+rodada que decidiu trabalho em contagens por categoria ("round: downloads 2,
+forgotten 190") via `report_activity` injetado no reconciler — rodada sem
+trabalho fica MUDA, então o regime estacionário de 30 s não polui o journal;
+(2) o `sweep` da lixeira devolve os paths que destruiu (relativos, ordenados)
+e o boot loga um por linha — o único registro que sobrevive à destruição.
+Coberto por teste nas três camadas (domínio puro, sweep real em disco,
+comportamento do ator com subject injetado).

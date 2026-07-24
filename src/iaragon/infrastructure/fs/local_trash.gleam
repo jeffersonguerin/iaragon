@@ -46,39 +46,56 @@ pub fn move_to_trash(
   Ok(Nil)
 }
 
-/// Remove trash entries older than the retention. Best-effort by design:
-/// the trash is a convenience net, and a sweep failure must never block the
+/// Remove trash entries older than the retention, and REPORT what was
+/// destroyed (trash-relative paths, sorted) — the one record that survives
+/// the destruction, so a boot that emptied the trash is explainable from
+/// the journal instead of a forensic mystery. Best-effort by design: the
+/// trash is a convenience net, and a sweep failure must never block the
 /// daemon's boot. Empty directories left behind are pruned opportunistically.
 pub fn sweep(
   root_dir: String,
   now_unix now_unix: Int,
   retention_seconds retention_seconds: Int,
-) -> Nil {
+) -> List(String) {
   let trash_root = root_dir <> "/" <> trash_dir_name
   case simplifile.is_directory(trash_root) {
-    Ok(True) -> sweep_directory(trash_root, now_unix - retention_seconds)
-    _ -> Nil
+    Ok(True) ->
+      sweep_directory(trash_root, "", now_unix - retention_seconds)
+      |> list.sort(string.compare)
+    _ -> []
   }
 }
 
-fn sweep_directory(directory: String, cutoff_unix: Int) -> Nil {
+fn sweep_directory(
+  directory: String,
+  relative_prefix: String,
+  cutoff_unix: Int,
+) -> List(String) {
   case simplifile.read_directory(directory) {
-    Error(_) -> Nil
+    Error(_) -> []
     Ok(entries) -> {
-      list.each(entries, fn(entry) {
-        let path = directory <> "/" <> entry
-        case simplifile.is_directory(path) {
-          Ok(True) -> sweep_directory(path, cutoff_unix)
-          _ ->
-            case simplifile.file_info(path) {
-              Ok(info) if info.mtime_seconds < cutoff_unix -> {
-                let _ = simplifile.delete_file(path)
-                Nil
+      let removed =
+        list.flat_map(entries, fn(entry) {
+          let path = directory <> "/" <> entry
+          let relative = case relative_prefix {
+            "" -> entry
+            prefix -> prefix <> "/" <> entry
+          }
+          case simplifile.is_directory(path) {
+            Ok(True) -> sweep_directory(path, relative, cutoff_unix)
+            _ ->
+              case simplifile.file_info(path) {
+                Ok(info) if info.mtime_seconds < cutoff_unix ->
+                  // Only a delete that actually happened is reported: the
+                  // return value is an audit record, not an intention.
+                  case simplifile.delete_file(path) {
+                    Ok(Nil) -> [relative]
+                    Error(_) -> []
+                  }
+                _ -> []
               }
-              _ -> Nil
-            }
-        }
-      })
+          }
+        })
       // Prune the skeleton when everything inside aged out.
       case simplifile.read_directory(directory) {
         Ok([]) -> {
@@ -87,6 +104,7 @@ fn sweep_directory(directory: String, cutoff_unix: Int) -> Nil {
         }
         _ -> Nil
       }
+      removed
     }
   }
 }

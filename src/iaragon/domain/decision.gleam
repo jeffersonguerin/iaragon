@@ -2,6 +2,11 @@
 //// constructor is an intention verb: the decision says what must be done,
 //// not what the world looks like.
 
+import gleam/int
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/string
+
 pub type ConflictKind {
   EditEdit
   LocalEditRemoteDelete
@@ -36,4 +41,100 @@ pub type SyncDecision {
   /// transfer nothing. Without the record every round re-hashes the pair.
   AdoptKnown(file_id: String, path: String)
   Noop
+}
+
+/// The audit line for a round: per-category counts of the decided work,
+/// nonzero categories only — `None` when the round decided nothing, so
+/// steady state (a round every 30 s) never spams the journal. Pure over the
+/// decision list; the caller owns where the line goes.
+pub fn describe_workload(decisions: List(SyncDecision)) -> Option(String) {
+  let line =
+    [
+      #("downloads", count(decisions, is_download)),
+      #("uploads", count(decisions, is_upload)),
+      #("local deletions", count(decisions, is_delete_local)),
+      #("remote trashings", count(decisions, is_delete_remote)),
+      #("local moves", count(decisions, is_move_local)),
+      #("remote renames", count(decisions, is_move_remote)),
+      #("conflicts", count(decisions, is_conflict)),
+      #("adopted", count(decisions, is_adopt)),
+      #("forgotten", count(decisions, is_forget)),
+    ]
+    |> list.filter(fn(category) { category.1 > 0 })
+    |> list.map(fn(category) { category.0 <> " " <> int.to_string(category.1) })
+    |> string.join(", ")
+  case line {
+    "" -> None
+    described -> Some(described)
+  }
+}
+
+fn count(
+  decisions: List(SyncDecision),
+  matches: fn(SyncDecision) -> Bool,
+) -> Int {
+  list.count(decisions, matches)
+}
+
+fn is_download(decision: SyncDecision) -> Bool {
+  case decision {
+    DownloadRemote(_, _) -> True
+    _ -> False
+  }
+}
+
+fn is_upload(decision: SyncDecision) -> Bool {
+  case decision {
+    UploadLocal(_) -> True
+    _ -> False
+  }
+}
+
+fn is_delete_local(decision: SyncDecision) -> Bool {
+  case decision {
+    DeleteLocal(_) -> True
+    _ -> False
+  }
+}
+
+fn is_delete_remote(decision: SyncDecision) -> Bool {
+  case decision {
+    DeleteRemote(_) -> True
+    _ -> False
+  }
+}
+
+fn is_move_local(decision: SyncDecision) -> Bool {
+  case decision {
+    MoveLocal(_, _, _) -> True
+    _ -> False
+  }
+}
+
+fn is_move_remote(decision: SyncDecision) -> Bool {
+  case decision {
+    MoveRemote(_, _, _) -> True
+    _ -> False
+  }
+}
+
+fn is_conflict(decision: SyncDecision) -> Bool {
+  case decision {
+    Conflict(_, _, _) -> True
+    _ -> False
+  }
+}
+
+fn is_adopt(decision: SyncDecision) -> Bool {
+  case decision {
+    AdoptKnown(_, _) -> True
+    _ -> False
+  }
+}
+
+fn is_forget(decision: SyncDecision) -> Bool {
+  case decision {
+    ForgetKnown(_) -> True
+    _ -> False
+  }
 }

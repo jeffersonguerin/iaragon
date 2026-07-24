@@ -56,7 +56,15 @@ pub fn the_sweep_removes_only_entries_past_retention_test() {
   let assert Ok(Nil) = set_mtime(trash <> "/old.txt", 1000)
   let assert Ok(Nil) = set_mtime(trash <> "/old-dir/older.txt", 1000)
 
-  local_trash.sweep(root, now_unix: 4_000_000, retention_seconds: 1_000_000)
+  // The sweep reports WHAT it destroyed (trash-relative, sorted) — the one
+  // record that survives the destruction, so a boot that emptied the trash
+  // is explainable from the journal instead of a forensic mystery.
+  assert local_trash.sweep(
+      root,
+      now_unix: 4_000_000,
+      retention_seconds: 1_000_000,
+    )
+    == ["old-dir/older.txt", "old.txt"]
 
   assert simplifile.is_file(trash <> "/old.txt") == Ok(False)
   assert simplifile.is_file(trash <> "/old-dir/older.txt") == Ok(False)
@@ -65,7 +73,8 @@ pub fn the_sweep_removes_only_entries_past_retention_test() {
 
 pub fn sweeping_without_a_trash_dir_is_a_noop_test() {
   let root = fresh_root("no-trash")
-  local_trash.sweep(root, now_unix: 4_000_000, retention_seconds: 1)
+  assert local_trash.sweep(root, now_unix: 4_000_000, retention_seconds: 1)
+    == []
   assert simplifile.is_directory(root <> "/.iaragon-trash") == Ok(False)
 }
 

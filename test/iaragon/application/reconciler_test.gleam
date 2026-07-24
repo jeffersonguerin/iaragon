@@ -109,6 +109,7 @@ fn start_reconciler_with_interval(
         round_interval_ms: round_interval_ms,
         today: fn() { "2026-07-22" },
         report_trouble: fn(_line) { Nil },
+        report_activity: fn(_line) { Nil },
         allow_mass_deletion: False,
       ),
     )
@@ -1139,6 +1140,7 @@ fn build_config(
     round_interval_ms: idle_round_interval,
     today: fn() { "2026-07-22" },
     report_trouble: fn(line) { process.send(trouble, line) },
+    report_activity: fn(_line) { Nil },
     allow_mass_deletion: allow_mass_deletion,
   )
 }
@@ -1374,4 +1376,76 @@ pub fn a_late_pool_down_spares_transfers_sent_to_the_new_pool_test() {
   process.send(sut, reconciler.ReconcileNow)
   let assert [UploadDispatched(_)] = receive_transfers(dispatches, 1)
   Nil
+}
+
+// --- audit trail -----------------------------------------------------------
+// One journal line per round that decided work, with per-category counts;
+// a workless steady-state round stays silent. This is the trail that was
+// missing when ~190 state entries vanished with a two-line log.
+
+pub fn a_working_round_reports_its_workload_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  let dispatches = process.new_subject()
+  let trouble = process.new_subject()
+  let activity = process.new_subject()
+  let name = process.new_name(prefix: "reconciler_test")
+  let assert Ok(_) =
+    reconciler.start(
+      name,
+      ReconcilerConfig(
+        ..build_config(owner, dispatches, fn() { Ok([]) }, trouble, False),
+        report_activity: fn(line) { process.send(activity, line) },
+      ),
+    )
+  let sut = process.named_subject(name)
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [
+      a_folder_sighting("id-docs", "docs", "root"),
+      a_sighting("id-1", "report.txt", "id-docs"),
+    ]),
+  )
+
+  let assert Ok(line) = process.receive(activity, 2000)
+  assert line == "round: downloads 2"
+}
+
+pub fn a_workless_round_stays_silent_test() {
+  let owner = fakes.start_ephemeral_state_owner()
+  process.send(
+    owner,
+    state_owner.PutKnown(KnownFile(
+      file_id: "id-1",
+      path: "report.txt",
+      remote_modified_time: "2026-07-01T10:00:00Z",
+      md5: Some("aaa"),
+      size: 42,
+      local_mtime_seconds: 1000,
+      kind: Blob,
+    )),
+  )
+  let dispatches = process.new_subject()
+  let trouble = process.new_subject()
+  let activity = process.new_subject()
+  let name = process.new_name(prefix: "reconciler_test")
+  let local =
+    LocalFile(path: "report.txt", size: 42, mtime_seconds: 1000, md5: None)
+  let assert Ok(_) =
+    reconciler.start(
+      name,
+      ReconcilerConfig(
+        ..build_config(owner, dispatches, fn() { Ok([local]) }, trouble, False),
+        report_activity: fn(line) { process.send(activity, line) },
+      ),
+    )
+  let sut = process.named_subject(name)
+
+  process.send(
+    sut,
+    reconciler.SeedMirror("root", [a_sighting("id-1", "report.txt", "root")]),
+  )
+
+  assert expect_no_transfers(dispatches)
+  assert process.receive(activity, 100) == Error(Nil)
 }

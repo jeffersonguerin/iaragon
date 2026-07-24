@@ -244,6 +244,9 @@ pub fn start_daemon(
       round_interval_ms: round_interval_ms,
       today: build_date_stamp,
       report_trouble: fn(line) { io.println_error("iaragon: " <> line) },
+      // stdout also lands in the user journal under systemd; activity is
+      // informational (the audit trail), trouble stays on stderr.
+      report_activity: fn(line) { io.println("iaragon: " <> line) },
       allow_mass_deletion: allow_mass_deletion,
     )
 

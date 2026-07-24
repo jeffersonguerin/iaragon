@@ -120,6 +120,8 @@ pub fn main() -> Nil {
   let mirror_root = home <> "/GoogleDrive"
   // Retention for the local trash (.iaragon-trash/): entries older than 30
   // days are swept once per boot — never from the sync path.
+  // The sweep reports what it destroyed; every dropped entry becomes one
+  // journal line — the record that survives the destruction.
   local_trash.sweep(
     mirror_root,
     now_unix: timestamp.system_time()
@@ -127,6 +129,11 @@ pub fn main() -> Nil {
       |> float.round,
     retention_seconds: 30 * 86_400,
   )
+  |> list.each(fn(entry) {
+    io.println(
+      "iaragon: trash sweep: dropped " <> entry <> " (past 30-day retention)",
+    )
+  })
   let _daemon =
     require(
       supervision.start_daemon(

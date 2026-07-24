@@ -163,6 +163,11 @@ pub type ReconcilerConfig {
     /// valve, failed scan) and stays quiet for the rest of the streak —
     /// same journal discipline as the poller's report_trouble.
     report_trouble: fn(String) -> Nil,
+    /// One line per round that decided work — per-category counts from
+    /// `decision.describe_workload`; workless rounds stay silent. The
+    /// journal-side audit trail of what the daemon chose to do, so a round
+    /// that forgets or deletes in bulk is explainable after the fact.
+    report_activity: fn(String) -> Nil,
     /// The explicit override for the mass-deletion valve (the composition
     /// reads IARAGON_ALLOW_MASS_DELETE=1). Off by default: a round that
     /// wants to delete most of the synced files is treated as an unmounted
@@ -550,6 +555,13 @@ fn run_round_with(state: State, locals: List(LocalFile)) -> State {
           )
         }
       }
+  }
+  // The audit line goes out BEFORE dispatching, over the decisions that
+  // will actually run (post-valve): bulk forgets and deletions become one
+  // explainable journal line instead of a silent state change.
+  case decision.describe_workload(decisions) {
+    Some(line) -> config.report_activity("round: " <> line)
+    None -> Nil
   }
   decisions
   |> list.fold(state, fn(state, decision) {
