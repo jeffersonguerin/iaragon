@@ -29,6 +29,8 @@ import iaragon/infrastructure/drive/transfer_pool
 import iaragon/infrastructure/drive/upload
 import iaragon/infrastructure/fs/emblems
 import iaragon/infrastructure/fs/local_trash
+import iaragon/infrastructure/overlay/single_instance
+import iaragon/infrastructure/overlay/status_probe
 import iaragon/infrastructure/overlay/status_server
 import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
@@ -74,6 +76,31 @@ pub fn main() -> Nil {
       simplifile.set_permissions_octal(data_dir, 0o700),
       "cannot restrict " <> data_dir,
     )
+  // Refuse to be the second daemon on this mirror BEFORE touching the state
+  // DB or the trash sweep: two instances silently fight each other and both
+  // upload the resulting conflicted copies (observed live).
+  let status_socket_path = resolve_status_socket_path(data_dir)
+  case
+    single_instance.detect_running_daemon(
+      status_socket_path,
+      probe: status_probe.query_status,
+    )
+  {
+    single_instance.AlreadyRunning(status) -> {
+      io.println_error(
+        "iaragon: refusing to start: another daemon is already answering on "
+        <> status_socket_path
+        <> " (status: "
+        <> status
+        <> ") — two daemons on one mirror fight each other; stop the other"
+        <> " one first (brew services stop iaragon, or systemctl --user"
+        <> " stop iaragon)",
+      )
+      halt_with_code(1)
+      panic as "unreachable: halted"
+    }
+    single_instance.Free -> Nil
+  }
   let db =
     require(
       state_db.open(data_dir <> "/state.db"),
@@ -109,7 +136,7 @@ pub fn main() -> Nil {
         transfers: build_transfer_ops(config_dir),
         native_policy: entry.default_native_doc_policy(),
         signal_status: emblems.build_status_painter(mirror_root),
-        status_socket_path: resolve_status_socket_path(data_dir),
+        status_socket_path: status_socket_path,
         // The explicit human override for the mass-deletion valve: a round
         // that would delete most of the synced files is refused unless the
         // user restarts with this set (rclone bisync's --force, as an env).
