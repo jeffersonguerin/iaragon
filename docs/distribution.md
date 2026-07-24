@@ -1,5 +1,48 @@
 # Distribuição e instalação
 
+Os caminhos de instalação, o release autocontido, o template systemd e as
+decisões/princípios do instalador.
+
+## Release autocontido (relocável) — `scripts/build-release.sh`
+
+O maior atrito histórico era "instalar = compilar do fonte" (exige toolchain
+Erlang/OTP ≥ 29 + Gleam + rebar3 + gcc/make). O `build-release.sh` produz um
+**bundle autocontido**: um tarball que roda em qualquer Linux compatível SEM
+Erlang/Gleam/rebar3/gcc no alvo — a sensação de "baixei algo e rodou".
+
+Layout do bundle:
+
+```
+iaragon-<os>-<arch>/
+  otp/            # ERTS + lib OTP + scripts (a BEAM inteira, embutida)
+  app/*/ebin      # a app Gleam compilada (todas as deps + NIFs esqlite/fs)
+  bin/iaragon           # daemon  (erl bundleado -eval iaragon@@main:run)
+  bin/iaragon-login     # login OAuth
+  bin/iaragon-doctor    # health check
+```
+
+**Por que é relocável (fato verificado no `erl` do OTP 29, sessão 24):** o
+`otp/bin/erl` bundleado deriva o `ROOTDIR` subindo a partir do próprio caminho
+até achar um irmão `erts-<vsn>` — a função `find_rootdir`, cujo próprio
+comentário diz *"It is likely that the files have been copied or moved"*. Logo,
+invocar o erl bundleado pelo caminho-de-dentro-do-bundle faz ele achar o OTP
+bundleado — sem passo de install, sem prefixo fixo, sem poluir o PATH. Os
+launchers ainda exportam `ERL_ROOTDIR` como cinto-e-suspensório. **Provado
+empiricamente**: num host com OTP 25 no sistema, o bundle roda seu OTP 29
+(`code:root_dir()` aponta pra dentro do bundle) e continua rodando depois de
+movido de diretório.
+
+**Restrição que o empacotador carrega:** ERTS e os NIFs (esqlite, fs) são
+código nativo compilado contra a libc/arch da MÁQUINA DE BUILD. O tarball é
+portanto por-(os, arch) e só roda em alvo com libc compatível-ou-mais-nova —
+buildar na glibc MAIS ANTIGA que se pretende suportar. O nome do arquivo grava
+a arch; a baseline de OS é a do builder e cabe ao empacotador rastreá-la.
+`inotify-tools` NÃO é bundleado (é um executável externo que o filespy/fs
+invoca); sem ele o daemon cai no watcher por polling (polly) — dep opcional de
+runtime, documentada, nunca um bloqueio.
+
+## Caminhos de instalação
+
 Dois caminhos de instalação (curl e Homebrew), o template systemd e as
 decisões/princípios do instalador.
 
