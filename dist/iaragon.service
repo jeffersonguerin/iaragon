@@ -19,6 +19,15 @@ Description=iaragon — bidirectional Google Drive sync daemon
 Documentation=https://github.com/jeffersonguerin/iaragon
 After=network-online.target
 Wants=network-online.target
+# Anti-crash-loop: if the daemon exits 5 times within 5 minutes, systemd
+# stops retrying and leaves the unit in `failed` state. Self-healing must
+# not become a tight loop that hammers the Drive API and buries the real
+# fault in the journal — a persistently-crashing daemon is a bug to surface
+# (visible to `iaragon-doctor` and `systemctl --user status`), not to hide
+# behind an infinite restart. Transient crashes still recover well within
+# this budget.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple

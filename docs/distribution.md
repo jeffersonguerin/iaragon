@@ -71,8 +71,15 @@ halt(0)'`). O módulo Gleam `iaragon/login` compila para o átomo Erlang
     PARA com instruções (kerl/asdf ou tarball builds.hex.pm), senão o daemon
     crasharia no primeiro uso.
   - Instala unit **systemd de usuário** (`~/.config/systemd/user/
-    iaragon.service`, `Restart=on-failure`); o dir do `erl` é embutido no PATH
-    dos launchers (funciona sob o PATH mínimo do systemd `--user`).
+    iaragon.service`, `Restart=on-failure` + `RestartSec=5`); o dir do `erl` é
+    embutido no PATH dos launchers (funciona sob o PATH mínimo do systemd
+    `--user`).
+  - **Guarda anti-crash-loop** (`StartLimitIntervalSec=300` +
+    `StartLimitBurst=5`): crash transitório se recupera sozinho, mas um daemon
+    que falha de forma persistente (5× em 5 min) para em estado `failed` em vez
+    de reiniciar para sempre — não martela a Drive API nem enterra a falha real
+    no journal; o `iaragon-doctor` e `systemctl --user status` expõem o estado.
+    Autocura não pode virar loop que esconde defeito.
   - Hardening do instalador (revisão de segurança/robustez por subagente
     adversarial — sem CRITICAL; negativos confirmados: sem `eval`/injeção,
     sudo com escopo só nos installs, traps limpas, truncamento seguro):

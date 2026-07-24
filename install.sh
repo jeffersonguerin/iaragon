@@ -509,6 +509,10 @@ Description=iaragon — bidirectional Google Drive sync daemon
 Documentation=https://github.com/jeffersonguerin/iaragon
 After=network-online.target
 Wants=network-online.target
+# Anti-crash-loop: give up after 5 exits in 5 minutes (unit -> failed,
+# visible to iaragon-doctor) rather than hammering the Drive API forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
