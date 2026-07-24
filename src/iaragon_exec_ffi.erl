@@ -30,4 +30,12 @@ collect_output(Port, Acc) ->
             {ok, Acc};
         {Port, {exit_status, _Failure}} ->
             {error, Acc}
+    %% A hung child (e.g. `gio` stalled on a dead dbus/gvfsd) would
+    %% otherwise block the CALLING ACTOR forever — the transfer pool runs
+    %% this synchronously per transfer, and supervision cannot see an
+    %% alive-but-stuck actor. 10 s of silence (the clock resets on every
+    %% chunk of output) is far beyond anything these helpers do.
+    after 10000 ->
+        catch port_close(Port),
+        {error, <<"command produced no output for 10s; gave up">>}
     end.

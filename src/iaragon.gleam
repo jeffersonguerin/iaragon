@@ -12,6 +12,7 @@ import gleam/float
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/httpc
+import gleam/io
 import gleam/list
 import gleam/result
 import gleam/string
@@ -33,22 +34,62 @@ import iaragon/infrastructure/persistence/state_db
 import iaragon/infrastructure/supervision
 import simplifile
 
+@external(erlang, "iaragon_probe_ffi", "halt_with_code")
+fn halt_with_code(code: Int) -> Nil
+
+/// Boot preconditions fail as ONE actionable journal line, not a crash dump:
+/// under systemd a raw `let assert` means an Erlang crash report plus a
+/// restart loop the user has to decode. (The reasons here are filesystem/db
+/// errors — never credentials.)
+fn require(outcome: Result(a, e), what: String) -> a {
+  case outcome {
+    Ok(value) -> value
+    Error(reason) -> {
+      io.println_error(
+        "iaragon: cannot start: "
+        <> what
+        <> " ("
+        <> string.inspect(reason)
+        <> ")",
+      )
+      halt_with_code(1)
+      panic as "unreachable: halted"
+    }
+  }
+}
+
 pub fn main() -> Nil {
-  let assert Ok(home) = envoy.get("HOME")
+  let home = require(envoy.get("HOME"), "HOME is not set")
   let data_dir = home <> "/.local/share/iaragon"
-  let assert Ok(Nil) = simplifile.create_directory_all(data_dir)
+  let _ =
+    require(
+      simplifile.create_directory_all(data_dir),
+      "cannot create " <> data_dir,
+    )
   // Owner-only: the data dir holds the state DB (the whole Drive tree index)
   // and the status socket. 0700 blocks other local users from reaching any of
   // it, regardless of each file's own mode.
-  let assert Ok(Nil) = simplifile.set_permissions_octal(data_dir, 0o700)
-  let assert Ok(db) = state_db.open(data_dir <> "/state.db")
+  let _ =
+    require(
+      simplifile.set_permissions_octal(data_dir, 0o700),
+      "cannot restrict " <> data_dir,
+    )
+  let db =
+    require(
+      state_db.open(data_dir <> "/state.db"),
+      "cannot open " <> data_dir <> "/state.db",
+    )
 
   let config_dir = home <> "/.config/iaragon"
   // Same guard as the data dir: the config dir holds oauth_client.json and
   // tokens.json. save_tokens only tightens it when a login writes; a daemon
   // running before (or without) a login would otherwise leave the
   // user-created dir world-readable.
-  let assert Ok(Nil) = client_store.protect_config_dir(config_dir)
+  let _ =
+    require(
+      client_store.protect_config_dir(config_dir),
+      "cannot restrict " <> config_dir,
+    )
   let mirror_root = home <> "/GoogleDrive"
   // Retention for the local trash (.iaragon-trash/): entries older than 30
   // days are swept once per boot — never from the sync path.
@@ -59,19 +100,22 @@ pub fn main() -> Nil {
       |> float.round,
     retention_seconds: 30 * 86_400,
   )
-  let assert Ok(_daemon) =
-    supervision.start_daemon(
-      store: state_db.build_state_store(db),
-      drive: build_drive_port(config_dir),
-      mirror_root: mirror_root,
-      transfers: build_transfer_ops(config_dir),
-      native_policy: entry.default_native_doc_policy(),
-      signal_status: emblems.build_status_painter(mirror_root),
-      status_socket_path: resolve_status_socket_path(data_dir),
-      // The explicit human override for the mass-deletion valve: a round
-      // that would delete most of the synced files is refused unless the
-      // user restarts with this set (rclone bisync's --force, as an env).
-      allow_mass_deletion: envoy.get("IARAGON_ALLOW_MASS_DELETE") == Ok("1"),
+  let _daemon =
+    require(
+      supervision.start_daemon(
+        store: state_db.build_state_store(db),
+        drive: build_drive_port(config_dir),
+        mirror_root: mirror_root,
+        transfers: build_transfer_ops(config_dir),
+        native_policy: entry.default_native_doc_policy(),
+        signal_status: emblems.build_status_painter(mirror_root),
+        status_socket_path: resolve_status_socket_path(data_dir),
+        // The explicit human override for the mass-deletion valve: a round
+        // that would delete most of the synced files is refused unless the
+        // user restarts with this set (rclone bisync's --force, as an env).
+        allow_mass_deletion: envoy.get("IARAGON_ALLOW_MASS_DELETE") == Ok("1"),
+      ),
+      "the supervision tree failed to start",
     )
   // The poller self-kicks on start (and on every supervisor restart); the
   // daemon just needs to stay alive.

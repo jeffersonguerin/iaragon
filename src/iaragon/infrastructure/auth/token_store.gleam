@@ -7,6 +7,7 @@
 
 import filepath
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/result
 import simplifile
@@ -41,7 +42,11 @@ pub fn save_tokens(
   // Temp-then-rename: the real path only ever appears atomically, already
   // 0600 — no window where a reader sees a half-written or world-readable
   // token file (and the 0700 parent dir blocks other users regardless).
-  let temp = path <> ".tmp"
+  // The temp name is UNIQUE per write: refreshes can race (poller, pool and
+  // doctor each refresh on demand), and with a fixed name one writer could
+  // rename the other's half-written temp into place, corrupting tokens.json
+  // until a manual re-login.
+  let temp = path <> ".tmp." <> int.to_string(int.random(1_000_000_000))
   use Nil <- result.try(simplifile.write(to: temp, contents: contents))
   use Nil <- result.try(simplifile.set_permissions_octal(temp, 0o600))
   simplifile.rename(at: temp, to: path)

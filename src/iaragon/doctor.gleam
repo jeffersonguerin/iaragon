@@ -1,9 +1,11 @@
 //// Health check for the installed daemon: `iaragon-doctor` (or
-//// `gleam run -m iaragon/doctor`). Entirely passive — reads config/state
-//// files and makes one query to the status socket — so it never disturbs a
-//// running daemon. The only network use is the token refresh the daemon
-//// would do anyway on its next API call, and only when the stored access
-//// token is already inside the expiry margin.
+//// `gleam run -m iaragon/doctor`). MOSTLY passive — reads config/state
+//// files and makes one query to the status socket — with two honest
+//// exceptions: the token check refreshes (and REWRITES tokens.json) when
+//// the stored access token is inside the expiry margin — the same refresh
+//// the daemon would do on its next API call — and `state_db.open` ensures
+//// the schema exists on the live database (a no-op after first boot).
+//// Neither touches the daemon's actors or the mirror.
 ////
 //// Thin composition of tested pieces (client_store, token_store,
 //// token_manager, state_db, status_probe, diagnostics) in the same spirit

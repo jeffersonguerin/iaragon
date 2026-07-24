@@ -535,3 +535,69 @@ pub fn a_native_link_is_never_inferred_as_a_renamed_file_test() {
     MoveRemote("id-doc", "notes.desktop", "plan.desktop"),
   )
 }
+
+pub fn an_edited_shortcut_link_is_never_uploaded_test() {
+  // A shortcut's local form is a generated .desktop link, exactly like a
+  // native's: uploading bytes onto the shortcut's fileId is rejected by the
+  // API, so the decision would retry to death every round — a livelock.
+  // Like a native local edit, it must surface as a conflict to preserve.
+  let known =
+    KnownFile(
+      ..a_known(),
+      path: "docs/report.desktop",
+      md5: None,
+      size: 3,
+      kind: entry.Shortcut("target-1"),
+    )
+  let remote =
+    RemoteFile(
+      ..a_remote(),
+      path: "docs/report.desktop",
+      mime_type: "application/vnd.google-apps.shortcut",
+      size: None,
+      md5: None,
+      kind: entry.Shortcut("target-1"),
+    )
+  let edited =
+    LocalFile(
+      path: "docs/report.desktop",
+      size: 99,
+      mtime_seconds: 2000,
+      md5: None,
+    )
+
+  let decision = reconcile.reconcile(Some(edited), Some(remote), Some(known))
+
+  assert decision == Conflict("docs/report.desktop", "id-1", NativeLocalEdit)
+}
+
+pub fn a_remotely_renamed_folder_moves_the_local_directory_test() {
+  // Folders never appear in the local scan, so the rename branch that
+  // relocates files (Some local) is unreachable for them — without this
+  // case, a folder renamed on the Drive side leaves the old local dir
+  // behind forever (children migrate one by one into the new one) and the
+  // index keeps the stale path.
+  let known =
+    KnownFile(
+      ..a_known(),
+      file_id: "id-dir",
+      path: "old-name",
+      md5: None,
+      size: 0,
+      kind: entry.Folder,
+    )
+  let renamed =
+    RemoteFile(
+      ..a_remote(),
+      file_id: "id-dir",
+      name: "new-name",
+      path: "new-name",
+      mime_type: "application/vnd.google-apps.folder",
+      size: None,
+      md5: None,
+      kind: entry.Folder,
+    )
+
+  assert reconcile.reconcile(None, Some(renamed), Some(known))
+    == MoveLocal("id-dir", "old-name", "new-name")
+}

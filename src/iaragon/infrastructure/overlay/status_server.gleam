@@ -9,9 +9,9 @@
 //// on bind.
 
 import gleam/erlang/process.{type Pid, type Subject}
+import gleam/io
 import gleam/otp/actor
 import gleam/otp/supervision.{type ChildSpecification}
-import gleam/result
 import gleam/string
 
 @external(erlang, "iaragon_status_ffi", "serve_status_lines")
@@ -57,7 +57,21 @@ pub fn start(
   answer: fn(String) -> String,
 ) -> actor.StartResult(Subject(Nil)) {
   actor.new_with_initialiser(1000, fn(subject) {
-    use _acceptor <- result.try(serve_status_lines(sock_path, answer))
+    // The status socket is DECORATION (overlays, tray). If it cannot bind —
+    // classically an AF_UNIX path over the ~107-byte limit under a deep
+    // $HOME with no XDG_RUNTIME_DIR — the daemon must still sync: warn once
+    // and run without it rather than fail the whole supervision tree.
+    case serve_status_lines(sock_path, answer) {
+      Ok(_acceptor) -> Nil
+      Error(reason) ->
+        io.println_error(
+          "iaragon: status socket unavailable at "
+          <> sock_path
+          <> " ("
+          <> reason
+          <> ") — file-manager overlays and the tray will show unknown",
+        )
+    }
     actor.initialised(Nil)
     |> actor.returning(subject)
     |> Ok

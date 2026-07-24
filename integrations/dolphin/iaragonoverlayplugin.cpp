@@ -11,6 +11,9 @@
 namespace
 {
 constexpr qint64 cacheTtlMs = 3000;
+// Sweep expired cache entries once the hash outgrows this — bounds memory
+// to the recently-browsed set instead of every path ever visited.
+constexpr int cacheSweepThreshold = 4096;
 constexpr qint64 reconnectHoldOffMs = 5000;
 
 QStringList overlaysForStatus(const QByteArray &status)
@@ -121,6 +124,19 @@ void IaragonOverlayPlugin::readReplies()
         entry.overlays = overlays;
         entry.freshUntilMs = m_clock.elapsed() + cacheTtlMs;
         m_cache.insert(path, entry);
+        // Entries expire (TTL) but were never REMOVED, so the hash grew with
+        // every distinct path ever browsed for Dolphin's whole lifetime.
+        // Sweep the expired ones opportunistically once the cache is big.
+        if (m_cache.size() > cacheSweepThreshold) {
+            const qint64 now = m_clock.elapsed();
+            for (auto it = m_cache.begin(); it != m_cache.end();) {
+                if (now >= it->freshUntilMs) {
+                    it = m_cache.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         if (overlays != before) {
             Q_EMIT overlaysChanged(QUrl::fromLocalFile(path), overlays);
         }

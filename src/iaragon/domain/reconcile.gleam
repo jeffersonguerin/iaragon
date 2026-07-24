@@ -68,8 +68,16 @@ pub fn reconcile(
         // The local scan lists files, never directories: a synced folder
         // always looks locally absent, and that must not read as deleted.
         // (Local deletion of an EMPTY folder therefore does not propagate;
-        // its files' deletions do.)
-        entry.Folder -> Noop
+        // its files' deletions do.) A REMOTE rename still relocates the
+        // local dir — the rename branch below is unreachable for folders,
+        // and without this the old dir lingers forever while the index
+        // keeps the stale path. (The pool's move is idempotent and yields
+        // when children already carried the content across.)
+        entry.Folder ->
+          case r.path != k.path {
+            True -> MoveLocal(k.file_id, k.path, r.path)
+            False -> Noop
+          }
         entry.Blob | entry.GoogleNative | entry.Shortcut(_) ->
           case detect_remote_change(r, k) {
             False -> DeleteRemote(r.file_id)
@@ -96,14 +104,17 @@ fn reconcile_in_place(
     // native replaces/converts it — not safe on the documented API). So a
     // LOCAL edit is never uploaded: it surfaces as a conflict for the
     // application to preserve by policy. A purely REMOTE change re-exports
-    // over the (unchanged) local copy.
-    entry.GoogleNative ->
+    // over the (unchanged) local copy. A SHORTCUT's local form is a
+    // generated link exactly like a native's — uploading bytes onto the
+    // shortcut's fileId is rejected by the API, so treating an edit as
+    // UploadLocal would retry to death every round.
+    entry.GoogleNative | entry.Shortcut(_) ->
       case detect_local_change(l, k), detect_remote_change(r, k) {
         False, False -> Noop
         False, True -> DownloadRemote(r.file_id, k.path)
         True, _ -> Conflict(k.path, k.file_id, NativeLocalEdit)
       }
-    entry.Blob | entry.Folder | entry.Shortcut(_) ->
+    entry.Blob | entry.Folder ->
       case detect_local_change(l, k), detect_remote_change(r, k) {
         False, False -> Noop
         True, False -> UploadLocal(l.path)

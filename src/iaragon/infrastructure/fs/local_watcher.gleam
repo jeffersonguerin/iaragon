@@ -80,7 +80,7 @@ pub fn add_watch_source(
           filespy.new()
           |> filespy.add_dir(mirror_root)
           |> filespy.set_handler(fn(_path, _event) {
-            process.send(notify, NoticeLocalActivity)
+            send_best_effort(notify, NoticeLocalActivity)
           })
           |> filespy.start
         }),
@@ -106,7 +106,21 @@ pub fn build_watch_options(
   |> polly.add_dir(mirror_root)
   |> polly.interval(poll_interval_ms)
   |> polly.ignore_initial_missing
-  |> polly.add_callback(fn(_event) { process.send(notify, NoticeLocalActivity) })
+  |> polly.add_callback(fn(_event) {
+    send_best_effort(notify, NoticeLocalActivity)
+  })
+}
+
+/// Send only while the target name is registered: a raw `process.send` to a
+/// named subject whose owner is mid-restart RAISES in the sender, and here
+/// that sender is a supervised child (the filespy/polly handler or this
+/// watcher itself) — one transient reconciler restart would otherwise
+/// cascade into watcher restarts and burn the supervisor's budget.
+fn send_best_effort(subject: Subject(message), message: message) -> Nil {
+  case process.subject_owner(subject) {
+    Ok(_) -> process.send(subject, message)
+    Error(_) -> Nil
+  }
 }
 
 fn handle_command(
@@ -127,7 +141,7 @@ fn handle_command(
         }
       }
     FlushActivity -> {
-      process.send(state.config.deliver, reconciler.ReconcileNow)
+      send_best_effort(state.config.deliver, reconciler.ReconcileNow)
       actor.continue(State(..state, flush_scheduled: False))
     }
   }

@@ -315,36 +315,45 @@ de corrigir. **Corrigidos nesta sessão** (cada um com teste de regressão):
   glob alfabético; .deb sem Depends/copyright; rpm sem %license; docs
   dessincronizadas (unit "copiada" que nunca foi, 4 FFIs → 6, launchers).
 
-**Residuais confirmados, NÃO corrigidos (backlog priorizado):**
+**Residuais: TODOS os MED/LOW acima foram corrigidos na própria sessão 24**
+(cada um com teste de regressão, salvo os dois indicados):
 
-1. (MED) `status_board` sem remoção de entradas: dict só cresce e um
-   `SyncFailed` de path depois deletado/renomeado prende o agregado
-   (`FetchOverall`/tray) em "failed" para sempre. Direção: `ClearStatus`
-   no delete/move + eviction.
-2. (MED) Corrida no DOWN do pool: `ForgetInFlight` pode limpar pendência já
-   re-despachada ao pool NOVO → segundo `files.create` → duplicata no
-   Drive. Direção: taggear pendências com a geração/pid do pool.
-3. (MED) Cache `created_folders` do pool nunca invalida: id de pasta morta
-   → loop de 404; pasta trashada → upload "para dentro da lixeira".
-   Direção: limpar cache em settle de falha.
-4. (MED) Refresh de token concorrente (poller×pool×doctor) com temp de nome
-   FIXO: interleaving raro pode renomear temp meio-escrito → tokens.json
-   corrompido → re-login manual. Direção: sufixo único no temp.
-5. (MED-LOW) Crash do reconciler multiplica cadeias do timer `ReconcileNow`
-   (uma por crash, para sempre — degradação cumulativa). Direção: geração
-   no timer.
-6. (LOW) Sends crus na cadeia do watcher amplificam um crash (até 3
-   restarts do budget); (LOW) edição local do `.desktop` de um Shortcut
-   vira `UploadLocal` no id do shortcut → livelock de retry; (LOW) rename
-   remoto de pasta deixa dir vazio órfão + known da pasta com path velho;
-   (LOW) `record_downloaded` faz stat DEPOIS do rename (janela de ms que
-   grava edição do usuário como synced e depois a sobrescreve); (LOW)
-   loopback OAuth aceita UMA conexão (preconnect especulativo do browser
-   pode travar o login); (LOW) `run_command` sem timeout (um `gio`
-   pendurado congela o pool); (LOW) asserts de boot hostis + socket path
-   >107 bytes derruba o daemon inteiro; (LOW) doctor não é 100% passivo
-   (refresh grava tokens.json; `state_db.open` cria tabela no DB vivo);
-   (LOW) cache do plugin Dolphin cresce sem eviction.
-7. (Decisão de produto) Nativo both-created sobrescreve arquivo local nunca
-   sincronizado sem conflicted-copy (deliberado e testado, mas a
-   justificativa cobre não-subir, não cobre não-preservar).
+- status_board ganhou `ClearStatus` (pool limpa no delete/move) — SyncFailed
+  órfão não prende mais o agregado do tray, e o board acompanha o espelho
+  vivo em vez de crescer para sempre.
+- Pendências do reconciler taggeadas com o pid do pool de despacho; o DOWN
+  limpa só as do pool morto — DOWN atrasado não duplica mais arquivo no
+  Drive.
+- Timer periódico virou `TickRound(generation)` (geração aleatória por
+  encarnação): crash não multiplica cadeias — e o `ReconcileNow` do watcher
+  NÃO re-arma mais (cada rajada de FS adicionava uma cadeia eterna, pior
+  que o cenário de crash do achado original).
+- Cache `created_folders` é esvaziado em qualquer erro de upload (id morto
+  não envenena mais os retries até o restart). [sem teste dedicado — 3
+  linhas, racional no código]
+- `record_downloaded` recusa gravar known quando o tamanho no disco diverge
+  do remoto (edição na janela rename→record vira conflito preservado, não
+  sobrescrita silenciosa).
+- Refresh de token: temp de nome ÚNICO por escrita (corrida
+  poller×pool×doctor não corrompe mais tokens.json).
+- Loopback OAuth aceita em LOOP até o request real (preconnect especulativo
+  de browser não trava mais o login; fatia de 2s por conexão muda).
+- Watcher usa sends best-effort (reconciler reiniciando não derruba mais a
+  cadeia watcher/filespy — não queima o budget de restart).
+- `run_command` (gio/emblemas) com timeout de 10s de silêncio — filho
+  pendurado não congela mais o pool. [sem teste dedicado — cláusula after]
+- Boot: asserts viraram `require()` com UMA linha acionável no journal +
+  halt(1); status socket que não binda (path >107 bytes) vira aviso, não
+  morte da árvore inteira.
+- Doctor: doc honesta ("mostly passive" — refresh grava tokens.json;
+  state_db.open garante schema).
+- Domínio: edição local do `.desktop` de um Shortcut vira conflito
+  NativeLocalEdit (nunca UploadLocal no id do shortcut — livelock); pasta
+  renomeada remotamente emite MoveLocal do diretório (sem dir órfão nem
+  known com path velho).
+- Plugin Dolphin: sweep oportunista de entradas expiradas quando o cache
+  passa de 4096 entradas (recompilado e lintado).
+
+**Aberto (decisão de produto, não defeito):** nativo both-created sobrescreve
+arquivo local nunca sincronizado sem conflicted-copy (deliberado e testado,
+mas a justificativa cobre não-subir, não cobre não-preservar).

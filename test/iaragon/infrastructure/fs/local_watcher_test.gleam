@@ -133,3 +133,21 @@ pub fn the_inotify_source_feeds_the_watcher_through_the_tree_test() {
     }
   }
 }
+
+pub fn a_flush_with_no_reconciler_registered_does_not_crash_the_watcher_test() {
+  // The reconciler restarting is routine; a raw send to its unregistered
+  // name RAISES in the sender, and a crashing watcher would burn two more
+  // slots of the supervisor's restart budget for one transient fault.
+  let ghost_name: process.Name(reconciler.Command) =
+    process.new_name(prefix: "never_registered_reconciler")
+  let watcher = start_watcher(process.named_subject(ghost_name), 10)
+
+  process.send(watcher, local_watcher.NoticeLocalActivity)
+  process.sleep(60)
+
+  // Still alive and still answering.
+  assert process.subject_owner(watcher) != Error(Nil)
+  process.send(watcher, local_watcher.NoticeLocalActivity)
+  process.sleep(60)
+  assert process.subject_owner(watcher) != Error(Nil)
+}

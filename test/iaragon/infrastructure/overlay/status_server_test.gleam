@@ -1,3 +1,4 @@
+import gleam/string
 import iaragon/infrastructure/overlay/status_probe
 import iaragon/infrastructure/overlay/status_server
 import simplifile
@@ -128,4 +129,13 @@ pub fn an_accented_socket_path_binds_at_the_true_utf8_name_test() {
   let assert Ok(entries) = simplifile.read_directory(dir)
   assert entries == ["statüs.sock"]
   assert status_probe.query_status(sock, "/x") == Ok("synced")
+}
+
+pub fn an_unbindable_socket_path_does_not_kill_the_server_test() {
+  // AF_UNIX paths cap at ~107 bytes; a deep $HOME with no XDG_RUNTIME_DIR
+  // can exceed it. The socket is decoration — the actor (and with it the
+  // whole supervision tree) must come up anyway, just without the socket.
+  let assert Ok(Nil) = simplifile.create_directory_all(sock_dir)
+  let long = sock_dir <> "/" <> string.repeat("x", 200) <> ".sock"
+  let assert Ok(_) = status_server.start(long, fn(_line) { "synced" })
 }

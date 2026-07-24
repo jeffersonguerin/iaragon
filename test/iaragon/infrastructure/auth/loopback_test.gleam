@@ -72,3 +72,20 @@ pub fn refuses_an_oversized_request_line_test() {
   let assert Error(loopback.TransportBroke(_)) =
     loopback.await_authorization(listener, 5000, expected_state: "st-1")
 }
+
+@external(erlang, "iaragon_preconnect_ffi", "silent_connect")
+fn silent_connect(port: Int) -> Nil
+
+pub fn a_silent_preconnect_does_not_starve_the_real_redirect_test() {
+  // Browsers open speculative preconnects that never send a byte. With a
+  // single accept, one of those occupies the slot and the REAL redirect
+  // starves in the backlog — the user authorizes and the login still fails.
+  let assert Ok(#(listener, port)) = loopback.open_listener(0)
+  silent_connect(port)
+  // Let the preconnect be accepted first.
+  process.sleep(100)
+  browse_back(port, "code=code-9&state=st-1")
+
+  assert loopback.await_authorization(listener, 10_000, expected_state: "st-1")
+    == Ok("code-9")
+}
