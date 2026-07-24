@@ -175,3 +175,11 @@ não subiu fica local com aviso). Aritmética autotestável sem push:
 `.githooks/pre-push --next-version 1.99.9 patch` → `2.0.0` (validado com
 tabela de 8 casos, carry duplo incluído). O `stable` da Formula NÃO segue as
 tags automaticamente — atualizar o pin (url+sha256) segue decisão deliberada.
+
+Canal `canary` (sessão 28, na sequência do odômetro): além da `vX.Y.Z`
+imutável, o pre-push move a tag `canary` (ponteiro leve, forçado) para o
+commit mais novo de `main` a cada push — o "tip nomeado", mesma ideia do
+ponteiro `latest` do release. Nunca é uma versão; quem acompanha precisa de
+`git fetch --tags --force` (caveat padrão de tag de canal). Canais, então:
+`stable` = pin da Formula (deliberado), `canary` = tip do main (a tag e o
+`brew install --HEAD`), `latest` = último bundle publicado.

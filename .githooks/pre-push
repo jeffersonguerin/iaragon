@@ -246,4 +246,16 @@ if [ -n "$main_sha" ]; then
       echo "pre-push: warning: could not push tag v$next (kept locally)" >&2
     fi
   fi
+
+  # canary: a MOVING channel pointer to the newest main commit — never a
+  # version itself (the vX.Y.Z tags are the immutable history; this is the
+  # named tip, same idea as the `latest` release pointer). Forced on
+  # purpose: moving is its semantics. Consumers refreshing it need
+  # `git fetch --tags --force` — the standard caveat of channel tags.
+  git tag -f canary "$main_sha" >/dev/null
+  if git push --no-verify --quiet --force origin refs/tags/canary; then
+    echo "pre-push: canary -> $(git rev-parse --short "$main_sha")"
+  else
+    echo "pre-push: warning: could not move the canary tag (kept locally)" >&2
+  fi
 fi
